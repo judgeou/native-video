@@ -18,9 +18,20 @@ int WINAPI WinMain (
 	};
 
 	RegisterClass(&wndClass);
-	auto window = CreateWindow(className, L"Hello World 标题", WS_OVERLAPPEDWINDOW, 0, 0, 800, 600, NULL, NULL, hInstance, NULL);
+
+	int width = 800;
+	int height = 600;
+	auto window = CreateWindow(className, L"Hello World 标题", WS_OVERLAPPEDWINDOW, 0, 0, width, height, NULL, NULL, hInstance, NULL);
 
 	ShowWindow(window, SW_SHOW);
+
+	auto hdc = GetDC(window);
+	for (int x = 0; x < width; x++) {
+		for (int y = 0; y < height; y++) {
+			SetPixel(hdc, x, y, RGB(116, 185, 255));
+		}
+	}
+	ReleaseDC(window, hdc);
 
 	MSG msg;
 	while (GetMessage(&msg, window, 0, 0) > 0) {
