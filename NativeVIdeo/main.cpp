@@ -16,7 +16,7 @@ int WINAPI WinMain (
 	};
 
 	RegisterClass(&wndClass);
-	auto window = CreateWindow(className, L"Hello World", WS_OVERLAPPEDWINDOW, 0, 0, 800, 600, NULL, NULL, hInstance, NULL);
+	auto window = CreateWindow(className, L"Hello World БъЬт", WS_OVERLAPPEDWINDOW, 0, 0, 800, 600, NULL, NULL, hInstance, NULL);
 
 	ShowWindow(window, SW_SHOW);
 
