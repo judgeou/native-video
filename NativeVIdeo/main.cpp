@@ -7,6 +7,8 @@ int WINAPI WinMain (
 	_In_ LPSTR lpCmdLine,
 	_In_ int nShowCmd
 ) {
+	SetProcessDPIAware();
+
 	auto className = L"MyWindow";
 	WNDCLASSW wndClass = {};
 	wndClass.hInstance = hInstance;
