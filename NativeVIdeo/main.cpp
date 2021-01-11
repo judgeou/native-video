@@ -4,6 +4,28 @@
 
 using std::vector;
 
+struct Color_RGB
+{
+	uint8_t r;
+	uint8_t g;
+	uint8_t b;
+};
+
+void StretchBits (HWND hwnd, const vector<Color_RGB>& bits, int width, int height) {
+	auto hdc = GetDC(hwnd);
+	BITMAPINFO bitinfo = {};
+	auto& bmiHeader = bitinfo.bmiHeader;
+	bmiHeader.biSize = sizeof(bitinfo.bmiHeader);
+	bmiHeader.biWidth = width;
+	bmiHeader.biHeight = height;
+	bmiHeader.biPlanes = 1;
+	bmiHeader.biBitCount = 24;
+	bmiHeader.biCompression = BI_RGB;
+
+	StretchDIBits(hdc, 0, 0, width, height, 0, 0, width, height, &bits[0], &bitinfo, DIB_RGB_COLORS, SRCCOPY);
+	ReleaseDC(hwnd, hdc);
+}
+
 int WINAPI WinMain (
 	_In_ HINSTANCE hInstance,
 	_In_opt_ HINSTANCE hPrevInstance,
@@ -28,26 +50,8 @@ int WINAPI WinMain (
 
 	ShowWindow(window, SW_SHOW);
 
-	auto hdc = GetDC(window);
-	BITMAPINFO bitinfo = {};
-	auto& bmiHeader = bitinfo.bmiHeader;
-	bmiHeader.biSize = sizeof(bitinfo.bmiHeader);
-	bmiHeader.biWidth = width;
-	bmiHeader.biHeight = height;
-	bmiHeader.biPlanes = 1;
-	bmiHeader.biBitCount = 24;
-	bmiHeader.biCompression = BI_RGB;
-
-	struct Color_RGB
-	{
-		uint8_t r;
-		uint8_t g;
-		uint8_t b;
-	};
-	vector<Color_RGB> bytes(width* height, { 255, 0, 0 });
-
-	StretchDIBits(hdc, 0, 0, width, height, 0, 0, width, height, &bytes[0], &bitinfo, DIB_RGB_COLORS, SRCCOPY);
-	ReleaseDC(window, hdc);
+	vector<Color_RGB> bits(width * height, { 255, 0, 0 });
+	StretchBits(window, bits, width, height);
 
 	MSG msg;
 	while (GetMessage(&msg, window, 0, 0) > 0) {
