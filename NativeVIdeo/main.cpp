@@ -1,5 +1,8 @@
 #include <stdio.h>
+#include <vector>
 #include <Windows.h>
+
+using std::vector;
 
 int WINAPI WinMain (
 	_In_ HINSTANCE hInstance,
@@ -26,11 +29,24 @@ int WINAPI WinMain (
 	ShowWindow(window, SW_SHOW);
 
 	auto hdc = GetDC(window);
-	for (int x = 0; x < width; x++) {
-		for (int y = 0; y < height; y++) {
-			SetPixel(hdc, x, y, RGB(116, 185, 255));
-		}
-	}
+	BITMAPINFO bitinfo = {};
+	auto& bmiHeader = bitinfo.bmiHeader;
+	bmiHeader.biSize = sizeof(bitinfo.bmiHeader);
+	bmiHeader.biWidth = width;
+	bmiHeader.biHeight = height;
+	bmiHeader.biPlanes = 1;
+	bmiHeader.biBitCount = 24;
+	bmiHeader.biCompression = BI_RGB;
+
+	struct Color_RGB
+	{
+		uint8_t r;
+		uint8_t g;
+		uint8_t b;
+	};
+	vector<Color_RGB> bytes(width* height, { 255, 0, 0 });
+
+	StretchDIBits(hdc, 0, 0, width, height, 0, 0, width, height, &bytes[0], &bitinfo, DIB_RGB_COLORS, SRCCOPY);
 	ReleaseDC(window, hdc);
 
 	MSG msg;
