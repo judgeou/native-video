@@ -82,6 +82,34 @@ void StretchBits (HWND hwnd, const vector<Color_RGB>& bits, int width, int heigh
 	ReleaseDC(hwnd, hdc);
 }
 
+AVFrame* RequestFrame(AVFormatContext* fmtCtx, AVCodecContext* vcodecCtx) {
+	while (1) {
+		AVPacket* packet = av_packet_alloc();
+		int ret = av_read_frame(fmtCtx, packet);
+		if (ret == 0) {
+			ret = avcodec_send_packet(vcodecCtx, packet);
+			if (ret == 0) {
+				AVFrame* frame = av_frame_alloc();
+				ret = avcodec_receive_frame(vcodecCtx, frame);
+				if (ret == 0) {
+					av_packet_unref(packet);
+					return frame;
+				}
+				else if (ret == AVERROR(EAGAIN)) {
+					av_frame_unref(frame);
+				}
+			}
+		}
+		else {
+			return nullptr;
+		}
+
+		av_packet_unref(packet);
+	}
+
+	return nullptr;
+}
+
 int WINAPI WinMain (
 	_In_ HINSTANCE hInstance,
 	_In_opt_ HINSTANCE hPrevInstance,
@@ -109,44 +137,8 @@ int WINAPI WinMain (
 		}
 	}
 
-
-	AVFrame* firstframe;
-	while (1) {
-		AVPacket* packet = av_packet_alloc();
-		int ret = av_read_frame(fmtCtx, packet);
-		if (ret == 0) {
-			ret = avcodec_send_packet(vcodecCtx, packet);
-			if (ret == 0) {
-				AVFrame* frame = av_frame_alloc();
-				ret = avcodec_receive_frame(vcodecCtx, frame);
-				if (ret == 0) {
-					firstframe = frame;
-					break;
-				}
-				else if (ret == AVERROR(EAGAIN)) {
-
-				}
-
-				av_frame_unref(frame);
-			}
-		}
-
-		av_packet_unref(packet);
-	}
-
-	// 常见的都是YUV420p格式
-	AVPixelFormat format = (AVPixelFormat)firstframe->format;
-
 	int width = vcodecCtx->width;
 	int height = vcodecCtx->height;
-
-	vector<Color_RGB> pixels(width * height);
-	for (int i = 0; i < pixels.size(); i++) {
-		uint8_t r = firstframe->data[0][i];
-		uint8_t g = r;
-		uint8_t b = r;
-		pixels[i] = { r, g, b };
-	}
 
 	auto className = L"MyWindow";
 	WNDCLASSW wndClass = {};
@@ -162,10 +154,22 @@ int WINAPI WinMain (
 
 	ShowWindow(window, SW_SHOW);
 
-	StretchBits(window, pixels, width, height);
-
 	MSG msg;
 	while (GetMessage(&msg, window, 0, 0) > 0) {
+		AVFrame* frame = RequestFrame(fmtCtx, vcodecCtx);
+
+		vector<Color_RGB> pixels(width * height);
+		for (int i = 0; i < pixels.size(); i++) {
+			uint8_t r = frame->data[0][i];
+			uint8_t g = r;
+			uint8_t b = r;
+			pixels[i] = { r, g, b };
+		}
+
+		av_frame_free(&frame);
+
+		StretchBits(window, pixels, width, height);
+
 		TranslateMessage(&msg);
 		DispatchMessage(&msg);
 	}
