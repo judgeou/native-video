@@ -73,7 +73,7 @@ void StretchBits (HWND hwnd, const vector<Color_RGB>& bits, int width, int heigh
 	auto& bmiHeader = bitinfo.bmiHeader;
 	bmiHeader.biSize = sizeof(bitinfo.bmiHeader);
 	bmiHeader.biWidth = width;
-	bmiHeader.biHeight = height;
+	bmiHeader.biHeight = -height; // 自上而下渲染画面
 	bmiHeader.biPlanes = 1;
 	bmiHeader.biBitCount = 24;
 	bmiHeader.biCompression = BI_RGB;
