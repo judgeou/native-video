@@ -78,9 +78,13 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
+    <IncludePath>D:\Download\ffmpeg-N-99604-g62073cfa97-win64-gpl-shared-vulkan\include;$(IncludePath)</IncludePath>
+    <LibraryPath>D:\Download\ffmpeg-N-99604-g62073cfa97-win64-gpl-shared-vulkan\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
+    <IncludePath>D:\Download\ffmpeg-N-99604-g62073cfa97-win64-gpl-shared-vulkan\include;$(IncludePath)</IncludePath>
+    <LibraryPath>D:\Download\ffmpeg-N-99604-g62073cfa97-win64-gpl-shared-vulkan\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
