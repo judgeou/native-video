@@ -15,6 +15,9 @@ extern "C" {
 
 #include <libavutil/imgutils.h>
 #pragma comment(lib, "avutil.lib")
+
+#include <libswscale/swscale.h>
+#pragma comment(lib, "swscale.lib")
 }
 
 using std::vector;
@@ -145,6 +148,20 @@ void ReleaseDecoder(DecoderParam& param) {
 	avformat_close_input(&param.fmtCtx);
 }
 
+vector<Color_RGB> GetRGBPixels(AVFrame* frame, vector<Color_RGB>& buffer) {
+	static SwsContext* swsctx = nullptr;
+	swsctx = sws_getCachedContext(
+		swsctx,
+		frame->width, frame->height, (AVPixelFormat)frame->format,
+		frame->width, frame->height, AVPixelFormat::AV_PIX_FMT_BGR24, NULL, NULL, NULL, NULL);
+
+	uint8_t* data[] = { (uint8_t*)&buffer[0] };
+	int linesize[] = { frame->width * 3 };
+	sws_scale(swsctx, frame->data, frame->linesize, 0, frame->height, data, linesize);
+
+	return buffer;
+}
+
 int WINAPI WinMain (
 	_In_ HINSTANCE hInstance,
 	_In_opt_ HINSTANCE hPrevInstance,
@@ -180,6 +197,8 @@ int WINAPI WinMain (
 	auto& fmtCtx = decoderParam.fmtCtx;
 	auto& vcodecCtx = decoderParam.vcodecCtx;
 
+	vector<Color_RGB> buffer(width * height);
+
 	auto window = CreateWindow(className, L"Hello World БъЬт", WS_OVERLAPPEDWINDOW, 0, 0, decoderParam.width, decoderParam.height, NULL, NULL, hInstance, NULL);
 
 	ShowWindow(window, SW_SHOW);
@@ -197,13 +216,7 @@ int WINAPI WinMain (
 		else {
 			AVFrame* frame = RequestFrame(decoderParam);
 
-			vector<Color_RGB> pixels(width * height);
-			for (int i = 0; i < pixels.size(); i++) {
-				uint8_t r = frame->data[0][i];
-				uint8_t g = r;
-				uint8_t b = r;
-				pixels[i] = { r, g, b };
-			}
+			vector<Color_RGB> pixels = GetRGBPixels(frame, buffer);
 
 			av_frame_free(&frame);
 
