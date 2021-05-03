@@ -77,20 +77,6 @@ std::wstring AskVideoFilePath() {
 	}
 }
 
-void StretchBits(IDirect3DDevice9* device, const vector<uint8_t>& bits, int width, int height) {
-	ComPtr<IDirect3DSurface9> surface;
-	device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, surface.GetAddressOf());
-
-	D3DLOCKED_RECT lockRect;
-	surface->LockRect(&lockRect, NULL, D3DLOCK_DISCARD);
-
-	memcpy(lockRect.pBits, &bits[0], bits.size());
-
-	surface->UnlockRect();
-
-	device->Present(NULL, NULL, NULL, NULL);
-}
-
 struct DecoderParam
 {
 	AVFormatContext* fmtCtx;
@@ -161,22 +147,31 @@ void ReleaseDecoder(DecoderParam& param) {
 	avformat_close_input(&param.fmtCtx);
 }
 
-void GetRGBPixels(AVFrame* frame, vector<uint8_t>& buffer, AVPixelFormat pixelFormat, int byteCount) {
-	AVFrame* swFrame = av_frame_alloc();
-	av_hwframe_transfer_data(swFrame, frame, 0);
-	frame = swFrame;
+void RenderHWFrame(HWND hwnd, AVFrame* frame) {
+	IDirect3DSurface9* surface = (IDirect3DSurface9*)frame->data[3];
+	IDirect3DDevice9* device;
+	surface->GetDevice(&device);
 
-	static SwsContext* swsctx = nullptr;
-	swsctx = sws_getCachedContext(
-		swsctx,
-		frame->width, frame->height, (AVPixelFormat)frame->format,
-		frame->width, frame->height, pixelFormat, NULL, NULL, NULL, NULL);
+	static ComPtr<IDirect3DSwapChain9> mySwap;
+	if (mySwap == nullptr) {
+		D3DPRESENT_PARAMETERS params = {};
+		params.Windowed = TRUE;
+		params.hDeviceWindow = hwnd;
+		params.BackBufferFormat = D3DFORMAT::D3DFMT_X8R8G8B8;
+		params.BackBufferWidth = frame->width;
+		params.BackBufferHeight = frame->height;
+		params.SwapEffect = D3DSWAPEFFECT_DISCARD;
+		params.BackBufferCount = 1;
+		params.Flags = 0;
+		device->CreateAdditionalSwapChain(&params, mySwap.GetAddressOf());
+	}
 
-	uint8_t* data[] = { &buffer[0] };
-	int linesize[] = { frame->width * byteCount };
-	sws_scale(swsctx, frame->data, frame->linesize, 0, frame->height, data, linesize);
+	ComPtr<IDirect3DSurface9> backSurface;
+	mySwap->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, backSurface.GetAddressOf());
 
-	av_frame_free(&swFrame);
+	device->StretchRect(surface, NULL, backSurface.Get(), NULL, D3DTEXF_LINEAR);
+
+	mySwap->Present(NULL, NULL, NULL, NULL, NULL);
 }
 
 int WINAPI WinMain (
@@ -216,7 +211,7 @@ int WINAPI WinMain (
 
 	vector<uint8_t> buffer(width * height * 4);
 
-	auto window = CreateWindow(className, L"Hello World 标题", WS_OVERLAPPEDWINDOW, 0, 0, 1280, 720, NULL, NULL, hInstance, NULL);
+	auto window = CreateWindow(className, L"Hello World 标题", WS_POPUP, 100, 100, 1280, 720, NULL, NULL, hInstance, NULL);
 
 	ShowWindow(window, SW_SHOW);
 
@@ -248,15 +243,13 @@ int WINAPI WinMain (
 		else {
 			AVFrame* frame = RequestFrame(decoderParam);
 
-			GetRGBPixels(frame, buffer, AVPixelFormat::AV_PIX_FMT_BGRA, 4);
-
-			av_frame_free(&frame);
-
 			double framerate = (double)vcodecCtx->framerate.den / vcodecCtx->framerate.num;
-			std::this_thread::sleep_until(currentTime + milliseconds((int)(framerate * 1000)));
+			// std::this_thread::sleep_until(currentTime + milliseconds((int)(framerate * 1000)));
 			currentTime = system_clock::now();
 
-			StretchBits(d3d9Device.Get(), buffer, width, height);
+			RenderHWFrame(window, frame);
+
+			av_frame_free(&frame);
 		}
 	}
 
