@@ -161,7 +161,7 @@ void ReleaseDecoder(DecoderParam& param) {
 	avformat_close_input(&param.fmtCtx);
 }
 
-vector<uint8_t> GetRGBPixels(AVFrame* frame, vector<uint8_t>& buffer, AVPixelFormat pixelFormat, int byteCount) {
+void GetRGBPixels(AVFrame* frame, vector<uint8_t>& buffer, AVPixelFormat pixelFormat, int byteCount) {
 	AVFrame* swFrame = av_frame_alloc();
 	av_hwframe_transfer_data(swFrame, frame, 0);
 	frame = swFrame;
@@ -177,8 +177,6 @@ vector<uint8_t> GetRGBPixels(AVFrame* frame, vector<uint8_t>& buffer, AVPixelFor
 	sws_scale(swsctx, frame->data, frame->linesize, 0, frame->height, data, linesize);
 
 	av_frame_free(&swFrame);
-
-	return buffer;
 }
 
 int WINAPI WinMain (
@@ -218,7 +216,7 @@ int WINAPI WinMain (
 
 	vector<uint8_t> buffer(width * height * 4);
 
-	auto window = CreateWindow(className, L"Hello World 标题", WS_OVERLAPPEDWINDOW, 0, 0, decoderParam.width, decoderParam.height, NULL, NULL, hInstance, NULL);
+	auto window = CreateWindow(className, L"Hello World 标题", WS_OVERLAPPEDWINDOW, 0, 0, 1280, 720, NULL, NULL, hInstance, NULL);
 
 	ShowWindow(window, SW_SHOW);
 
@@ -250,7 +248,7 @@ int WINAPI WinMain (
 		else {
 			AVFrame* frame = RequestFrame(decoderParam);
 
-			GetRGBPixels(frame, buffer, AVPixelFormat::AV_PIX_FMT_RGB32, 4);
+			GetRGBPixels(frame, buffer, AVPixelFormat::AV_PIX_FMT_BGRA, 4);
 
 			av_frame_free(&frame);
 
