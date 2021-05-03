@@ -25,6 +25,9 @@ extern "C" {
 #include <d3d9.h>
 #pragma comment(lib, "d3d9.lib")
 
+#include <d3d11.h>
+#pragma comment(lib, "d3d11.lib")
+
 using Microsoft::WRL::ComPtr;
 
 using std::vector;
@@ -209,25 +212,42 @@ int WINAPI WinMain (
 	auto& fmtCtx = decoderParam.fmtCtx;
 	auto& vcodecCtx = decoderParam.vcodecCtx;
 
-	vector<uint8_t> buffer(width * height * 4);
-
-	auto window = CreateWindow(className, L"Hello World 标题", WS_POPUP, 100, 100, 1280, 720, NULL, NULL, hInstance, NULL);
+	int clientWidth = 1280;
+	int clientHeight = 720;
+	auto window = CreateWindow(className, L"Hello World 标题", WS_POPUP, 100, 100, clientWidth, clientHeight, NULL, NULL, hInstance, NULL);
 
 	ShowWindow(window, SW_SHOW);
 
-	// D3D9
-	ComPtr<IDirect3D9> d3d9 = Direct3DCreate9(D3D_SDK_VERSION);
-	ComPtr<IDirect3DDevice9> d3d9Device;
+	// D3D11
+	DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
+	auto& bufferDesc = swapChainDesc.BufferDesc;
+	bufferDesc.Width = clientWidth;
+	bufferDesc.Height = clientHeight;
+	bufferDesc.Format = DXGI_FORMAT::DXGI_FORMAT_B8G8R8A8_UNORM;
+	bufferDesc.RefreshRate.Numerator = 0;
+	bufferDesc.RefreshRate.Denominator = 0;
+	bufferDesc.Scaling = DXGI_MODE_SCALING_STRETCHED;
+	bufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
+	swapChainDesc.SampleDesc.Count = 1;
+	swapChainDesc.SampleDesc.Quality = 0;
+	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	swapChainDesc.BufferCount = 2;
+	swapChainDesc.OutputWindow = window;
+	swapChainDesc.Windowed = TRUE;
+	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+	swapChainDesc.Flags = 0;
 
-	D3DPRESENT_PARAMETERS d3dParams = {};
-	d3dParams.Windowed = TRUE;
-	d3dParams.SwapEffect = D3DSWAPEFFECT_DISCARD;
-	d3dParams.BackBufferFormat = D3DFORMAT::D3DFMT_X8R8G8B8;
-	d3dParams.Flags = D3DPRESENTFLAG_LOCKABLE_BACKBUFFER;
-	d3dParams.BackBufferWidth = width;
-	d3dParams.BackBufferHeight = height;
-	d3d9->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window, D3DCREATE_HARDWARE_VERTEXPROCESSING, &d3dParams, d3d9Device.GetAddressOf());
+	UINT flags = 0;
 
+#ifdef DEBUG
+	flags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif // DEBUG
+
+	ComPtr<IDXGISwapChain> swapChain;
+	ComPtr<ID3D11Device> d3ddeivce;
+	ComPtr<ID3D11DeviceContext> d3ddeviceCtx;
+	D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, flags, NULL, NULL, D3D11_SDK_VERSION, &swapChainDesc, &swapChain, &d3ddeivce, NULL, &d3ddeviceCtx);
+	
 	auto currentTime = system_clock::now();
 
 	MSG msg;
