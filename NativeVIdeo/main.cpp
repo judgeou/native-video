@@ -112,6 +112,11 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 		}
 	}
 
+	// ÆôÓÃÓ²¼þ½âÂëÆ÷
+	AVBufferRef* hw_device_ctx = nullptr;
+	av_hwdevice_ctx_create(&hw_device_ctx, AVHWDeviceType::AV_HWDEVICE_TYPE_DXVA2, NULL, NULL, NULL);
+	vcodecCtx->hw_device_ctx = hw_device_ctx;
+
 	param.fmtCtx = fmtCtx;
 	param.vcodecCtx = vcodecCtx;
 	param.width = vcodecCtx->width;
@@ -153,6 +158,10 @@ void ReleaseDecoder(DecoderParam& param) {
 }
 
 vector<Color_RGB> GetRGBPixels(AVFrame* frame, vector<Color_RGB>& buffer) {
+	AVFrame* swFrame = av_frame_alloc();
+	av_hwframe_transfer_data(swFrame, frame, 0);
+	frame = swFrame;
+
 	static SwsContext* swsctx = nullptr;
 	swsctx = sws_getCachedContext(
 		swsctx,
@@ -162,6 +171,8 @@ vector<Color_RGB> GetRGBPixels(AVFrame* frame, vector<Color_RGB>& buffer) {
 	uint8_t* data[] = { (uint8_t*)&buffer[0] };
 	int linesize[] = { frame->width * 3 };
 	sws_scale(swsctx, frame->data, frame->linesize, 0, frame->height, data, linesize);
+
+	av_frame_free(&swFrame);
 
 	return buffer;
 }
