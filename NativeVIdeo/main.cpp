@@ -221,6 +221,9 @@ int WINAPI WinMain (
 			av_frame_free(&frame);
 
 			StretchBits(window, pixels, width, height);
+
+			double framerate = (double)vcodecCtx->framerate.den / vcodecCtx->framerate.num;
+			Sleep(framerate * 1000);
 		}
 	}
 
