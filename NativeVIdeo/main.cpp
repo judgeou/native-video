@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <vector>
 #include <string>
+#include <chrono>
+#include <thread>
 
 #include <Windows.h>
 #include <ShlObj.h>
@@ -23,6 +25,8 @@ extern "C" {
 using std::vector;
 using std::string;
 using std::wstring;
+
+using namespace std::chrono;
 
 struct Color_RGB
 {
@@ -203,6 +207,8 @@ int WINAPI WinMain (
 
 	ShowWindow(window, SW_SHOW);
 
+	auto currentTime = system_clock::now();
+
 	MSG msg;
 	while (1) {
 		BOOL hasMsg = PeekMessage(&msg, NULL, 0, 0, PM_REMOVE);
@@ -220,10 +226,11 @@ int WINAPI WinMain (
 
 			av_frame_free(&frame);
 
-			StretchBits(window, pixels, width, height);
-
 			double framerate = (double)vcodecCtx->framerate.den / vcodecCtx->framerate.num;
-			Sleep(framerate * 1000);
+			std::this_thread::sleep_until(currentTime + milliseconds((int)(framerate * 1000)));
+			currentTime = system_clock::now();
+
+			StretchBits(window, pixels, width, height);
 		}
 	}
 
