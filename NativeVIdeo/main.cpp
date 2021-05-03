@@ -22,6 +22,11 @@ extern "C" {
 #pragma comment(lib, "swscale.lib")
 }
 
+#include <d3d9.h>
+#pragma comment(lib, "d3d9.lib")
+
+using Microsoft::WRL::ComPtr;
+
 using std::vector;
 using std::string;
 using std::wstring;
@@ -72,19 +77,18 @@ std::wstring AskVideoFilePath() {
 	}
 }
 
-void StretchBits (HWND hwnd, const vector<Color_RGB>& bits, int width, int height) {
-	auto hdc = GetDC(hwnd);
-	BITMAPINFO bitinfo = {};
-	auto& bmiHeader = bitinfo.bmiHeader;
-	bmiHeader.biSize = sizeof(bitinfo.bmiHeader);
-	bmiHeader.biWidth = width;
-	bmiHeader.biHeight = -height; // 自上而下渲染画面
-	bmiHeader.biPlanes = 1;
-	bmiHeader.biBitCount = 24;
-	bmiHeader.biCompression = BI_RGB;
+void StretchBits(IDirect3DDevice9* device, const vector<uint8_t>& bits, int width, int height) {
+	ComPtr<IDirect3DSurface9> surface;
+	device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, surface.GetAddressOf());
 
-	StretchDIBits(hdc, 0, 0, width, height, 0, 0, width, height, &bits[0], &bitinfo, DIB_RGB_COLORS, SRCCOPY);
-	ReleaseDC(hwnd, hdc);
+	D3DLOCKED_RECT lockRect;
+	surface->LockRect(&lockRect, NULL, D3DLOCK_DISCARD);
+
+	memcpy(lockRect.pBits, &bits[0], bits.size());
+
+	surface->UnlockRect();
+
+	device->Present(NULL, NULL, NULL, NULL);
 }
 
 struct DecoderParam
@@ -157,7 +161,7 @@ void ReleaseDecoder(DecoderParam& param) {
 	avformat_close_input(&param.fmtCtx);
 }
 
-vector<Color_RGB> GetRGBPixels(AVFrame* frame, vector<Color_RGB>& buffer) {
+vector<uint8_t> GetRGBPixels(AVFrame* frame, vector<uint8_t>& buffer, AVPixelFormat pixelFormat, int byteCount) {
 	AVFrame* swFrame = av_frame_alloc();
 	av_hwframe_transfer_data(swFrame, frame, 0);
 	frame = swFrame;
@@ -166,10 +170,10 @@ vector<Color_RGB> GetRGBPixels(AVFrame* frame, vector<Color_RGB>& buffer) {
 	swsctx = sws_getCachedContext(
 		swsctx,
 		frame->width, frame->height, (AVPixelFormat)frame->format,
-		frame->width, frame->height, AVPixelFormat::AV_PIX_FMT_BGR24, NULL, NULL, NULL, NULL);
+		frame->width, frame->height, pixelFormat, NULL, NULL, NULL, NULL);
 
-	uint8_t* data[] = { (uint8_t*)&buffer[0] };
-	int linesize[] = { frame->width * 3 };
+	uint8_t* data[] = { &buffer[0] };
+	int linesize[] = { frame->width * byteCount };
 	sws_scale(swsctx, frame->data, frame->linesize, 0, frame->height, data, linesize);
 
 	av_frame_free(&swFrame);
@@ -212,11 +216,24 @@ int WINAPI WinMain (
 	auto& fmtCtx = decoderParam.fmtCtx;
 	auto& vcodecCtx = decoderParam.vcodecCtx;
 
-	vector<Color_RGB> buffer(width * height);
+	vector<uint8_t> buffer(width * height * 4);
 
 	auto window = CreateWindow(className, L"Hello World 标题", WS_OVERLAPPEDWINDOW, 0, 0, decoderParam.width, decoderParam.height, NULL, NULL, hInstance, NULL);
 
 	ShowWindow(window, SW_SHOW);
+
+	// D3D9
+	ComPtr<IDirect3D9> d3d9 = Direct3DCreate9(D3D_SDK_VERSION);
+	ComPtr<IDirect3DDevice9> d3d9Device;
+
+	D3DPRESENT_PARAMETERS d3dParams = {};
+	d3dParams.Windowed = TRUE;
+	d3dParams.SwapEffect = D3DSWAPEFFECT_DISCARD;
+	d3dParams.BackBufferFormat = D3DFORMAT::D3DFMT_X8R8G8B8;
+	d3dParams.Flags = D3DPRESENTFLAG_LOCKABLE_BACKBUFFER;
+	d3dParams.BackBufferWidth = width;
+	d3dParams.BackBufferHeight = height;
+	d3d9->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window, D3DCREATE_HARDWARE_VERTEXPROCESSING, &d3dParams, d3d9Device.GetAddressOf());
 
 	auto currentTime = system_clock::now();
 
@@ -233,7 +250,7 @@ int WINAPI WinMain (
 		else {
 			AVFrame* frame = RequestFrame(decoderParam);
 
-			vector<Color_RGB> pixels = GetRGBPixels(frame, buffer);
+			GetRGBPixels(frame, buffer, AVPixelFormat::AV_PIX_FMT_RGB32, 4);
 
 			av_frame_free(&frame);
 
@@ -241,7 +258,7 @@ int WINAPI WinMain (
 			std::this_thread::sleep_until(currentTime + milliseconds((int)(framerate * 1000)));
 			currentTime = system_clock::now();
 
-			StretchBits(window, pixels, width, height);
+			StretchBits(d3d9Device.Get(), buffer, width, height);
 		}
 	}
 
