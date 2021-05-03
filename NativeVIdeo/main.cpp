@@ -15,8 +15,6 @@ extern "C" {
 
 #include <libavutil/imgutils.h>
 #pragma comment(lib, "avutil.lib")
-
-#pragma comment(lib, "Bcrypt.lib")
 }
 
 using std::vector;
@@ -82,11 +80,46 @@ void StretchBits (HWND hwnd, const vector<Color_RGB>& bits, int width, int heigh
 	ReleaseDC(hwnd, hdc);
 }
 
-AVFrame* RequestFrame(AVFormatContext* fmtCtx, AVCodecContext* vcodecCtx) {
+struct DecoderParam
+{
+	AVFormatContext* fmtCtx;
+	AVCodecContext* vcodecCtx;
+	int width;
+	int height;
+	int videoStreamIndex;
+};
+
+void InitDecoder(const char* filePath, DecoderParam& param) {
+	AVFormatContext* fmtCtx = nullptr;
+	avformat_open_input(&fmtCtx, filePath, NULL, NULL);
+	avformat_find_stream_info(fmtCtx, NULL);
+
+	AVCodecContext* vcodecCtx = nullptr;
+	for (int i = 0; i < fmtCtx->nb_streams; i++) {
+		const AVCodec* codec = avcodec_find_decoder(fmtCtx->streams[i]->codecpar->codec_id);
+		if (codec->type == AVMEDIA_TYPE_VIDEO) {
+			param.videoStreamIndex = i;
+			vcodecCtx = avcodec_alloc_context3(codec);
+			avcodec_parameters_to_context(vcodecCtx, fmtCtx->streams[i]->codecpar);
+			avcodec_open2(vcodecCtx, codec, NULL);
+		}
+	}
+
+	param.fmtCtx = fmtCtx;
+	param.vcodecCtx = vcodecCtx;
+	param.width = vcodecCtx->width;
+	param.height = vcodecCtx->height;
+}
+
+AVFrame* RequestFrame(DecoderParam& param) {
+	auto& fmtCtx = param.fmtCtx;
+	auto& vcodecCtx = param.vcodecCtx;
+	auto& videoStreamIndex = param.videoStreamIndex;
+
 	while (1) {
 		AVPacket* packet = av_packet_alloc();
 		int ret = av_read_frame(fmtCtx, packet);
-		if (ret == 0) {
+		if (ret == 0 && packet->stream_index == videoStreamIndex) {
 			ret = avcodec_send_packet(vcodecCtx, packet);
 			if (ret == 0) {
 				AVFrame* frame = av_frame_alloc();
@@ -100,14 +133,16 @@ AVFrame* RequestFrame(AVFormatContext* fmtCtx, AVCodecContext* vcodecCtx) {
 				}
 			}
 		}
-		else {
-			return nullptr;
-		}
 
 		av_packet_unref(packet);
 	}
 
 	return nullptr;
+}
+
+void ReleaseDecoder(DecoderParam& param) {
+	avcodec_free_context(&param.vcodecCtx);
+	avformat_close_input(&param.fmtCtx);
 }
 
 int WINAPI WinMain (
@@ -121,61 +156,62 @@ int WINAPI WinMain (
 
 	auto filePath = w2s(AskVideoFilePath());
 
-	AVFormatContext* fmtCtx = nullptr;
-	avformat_open_input(&fmtCtx, filePath.c_str(), NULL, NULL);
-	avformat_find_stream_info(fmtCtx, NULL);
-
-	int videoStreamIndex;
-	AVCodecContext* vcodecCtx = nullptr;
-	for (int i = 0; i < fmtCtx->nb_streams; i++) {
-		AVCodec* codec = avcodec_find_decoder(fmtCtx->streams[i]->codecpar->codec_id);
-		if (codec->type == AVMEDIA_TYPE_VIDEO) {
-			videoStreamIndex = i;
-			vcodecCtx = avcodec_alloc_context3(codec);
-			avcodec_parameters_to_context(vcodecCtx, fmtCtx->streams[i]->codecpar);
-			avcodec_open2(vcodecCtx, codec, NULL);
-		}
-	}
-
-	int width = vcodecCtx->width;
-	int height = vcodecCtx->height;
-
 	auto className = L"MyWindow";
 	WNDCLASSW wndClass = {};
 	wndClass.hInstance = hInstance;
 	wndClass.lpszClassName = className;
 	wndClass.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT {
-		return DefWindowProc(hwnd, msg, wParam, lParam);
+		switch (msg)
+		{
+		case WM_DESTROY:
+			PostQuitMessage(0);
+			return 0;
+		default:
+			return DefWindowProc(hwnd, msg, wParam, lParam);
+		}
 	};
 
 	RegisterClass(&wndClass);
 
-	auto window = CreateWindow(className, L"Hello World 标题", WS_OVERLAPPEDWINDOW, 0, 0, width, height, NULL, NULL, hInstance, NULL);
+	DecoderParam decoderParam;
+	InitDecoder(filePath.c_str(), decoderParam);
+	auto& width = decoderParam.width;
+	auto& height = decoderParam.height;
+	auto& fmtCtx = decoderParam.fmtCtx;
+	auto& vcodecCtx = decoderParam.vcodecCtx;
+
+	auto window = CreateWindow(className, L"Hello World 标题", WS_OVERLAPPEDWINDOW, 0, 0, decoderParam.width, decoderParam.height, NULL, NULL, hInstance, NULL);
 
 	ShowWindow(window, SW_SHOW);
 
 	MSG msg;
-	while (GetMessage(&msg, window, 0, 0) > 0) {
-		AVFrame* frame = RequestFrame(fmtCtx, vcodecCtx);
-
-		vector<Color_RGB> pixels(width * height);
-		for (int i = 0; i < pixels.size(); i++) {
-			uint8_t r = frame->data[0][i];
-			uint8_t g = r;
-			uint8_t b = r;
-			pixels[i] = { r, g, b };
+	while (1) {
+		BOOL hasMsg = PeekMessage(&msg, NULL, 0, 0, PM_REMOVE);
+		if (hasMsg) {
+			if (msg.message == WM_QUIT) {
+				break;
+			}
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
 		}
+		else {
+			AVFrame* frame = RequestFrame(decoderParam);
 
-		av_frame_free(&frame);
+			vector<Color_RGB> pixels(width * height);
+			for (int i = 0; i < pixels.size(); i++) {
+				uint8_t r = frame->data[0][i];
+				uint8_t g = r;
+				uint8_t b = r;
+				pixels[i] = { r, g, b };
+			}
 
-		StretchBits(window, pixels, width, height);
+			av_frame_free(&frame);
 
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
+			StretchBits(window, pixels, width, height);
+		}
 	}
 
-	avcodec_free_context(&vcodecCtx);
-	avformat_close_input(&fmtCtx);
+	ReleaseDecoder(decoderParam);
 
 	CoUninitialize();
 	return 0;
