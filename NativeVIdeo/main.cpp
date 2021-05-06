@@ -28,6 +28,9 @@ extern "C" {
 #include <d3d11.h>
 #pragma comment(lib, "d3d11.lib")
 
+#include "VertexShader.h"
+#include "PixelShader.h"
+
 using Microsoft::WRL::ComPtr;
 
 using std::vector;
@@ -36,11 +39,8 @@ using std::wstring;
 
 using namespace std::chrono;
 
-struct Color_RGB
-{
-	uint8_t r;
-	uint8_t g;
-	uint8_t b;
+struct Vertex {
+	float x; float y; float z;
 };
 
 string w2s(const wstring& wstr) {
@@ -150,31 +150,92 @@ void ReleaseDecoder(DecoderParam& param) {
 	avformat_close_input(&param.fmtCtx);
 }
 
-void RenderHWFrame(HWND hwnd, AVFrame* frame) {
-	IDirect3DSurface9* surface = (IDirect3DSurface9*)frame->data[3];
-	IDirect3DDevice9* device;
-	surface->GetDevice(&device);
+void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapchain) {
+	// 顶点输入
+	const Vertex vertices[] = {
+		{-1,		1,		0},
+		{1,			1,		0},
+		{1,			-1,		0},
+		{-1,		-1,		0},
+	};
 
-	static ComPtr<IDirect3DSwapChain9> mySwap;
-	if (mySwap == nullptr) {
-		D3DPRESENT_PARAMETERS params = {};
-		params.Windowed = TRUE;
-		params.hDeviceWindow = hwnd;
-		params.BackBufferFormat = D3DFORMAT::D3DFMT_X8R8G8B8;
-		params.BackBufferWidth = frame->width;
-		params.BackBufferHeight = frame->height;
-		params.SwapEffect = D3DSWAPEFFECT_DISCARD;
-		params.BackBufferCount = 1;
-		params.Flags = 0;
-		device->CreateAdditionalSwapChain(&params, mySwap.GetAddressOf());
-	}
+	D3D11_BUFFER_DESC bd = {};
+	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	bd.ByteWidth = sizeof(vertices);
+	bd.StructureByteStride = sizeof(Vertex);
+	D3D11_SUBRESOURCE_DATA sd = {};
+	sd.pSysMem = vertices;
 
-	ComPtr<IDirect3DSurface9> backSurface;
-	mySwap->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, backSurface.GetAddressOf());
+	ComPtr<ID3D11Buffer> pVertexBuffer;
+	device->CreateBuffer(&bd, &sd, &pVertexBuffer);
 
-	device->StretchRect(surface, NULL, backSurface.Get(), NULL, D3DTEXF_LINEAR);
+	UINT stride = sizeof(Vertex);
+	UINT offset = 0u;
+	ID3D11Buffer* vertexBuffers[] = { pVertexBuffer.Get() };
+	ctx->IASetVertexBuffers(0, 1, vertexBuffers, &stride, &offset);
 
-	mySwap->Present(NULL, NULL, NULL, NULL, NULL);
+	//  顶点索引
+	const UINT16 indices[] = {
+		0,1,2, 0,2,3
+	};
+
+	auto indicesSize = std::size(indices);
+	D3D11_BUFFER_DESC ibd = {};
+	ibd.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	ibd.ByteWidth = sizeof(indices);
+	ibd.StructureByteStride = sizeof(UINT16);
+	D3D11_SUBRESOURCE_DATA isd = {};
+	isd.pSysMem = indices;
+
+	ComPtr<ID3D11Buffer> pIndexBuffer;
+	device->CreateBuffer(&ibd, &isd, &pIndexBuffer);
+	ctx->IASetIndexBuffer(pIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
+
+	// 告诉系统我们画的是三角形
+	ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	// 顶点着色器
+	D3D11_INPUT_ELEMENT_DESC ied[] = {
+		{"POSITION", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0}
+	};
+	ComPtr<ID3D11InputLayout> pInputLayout;
+	device->CreateInputLayout(ied, std::size(ied), g_main_VS, sizeof(g_main_VS), &pInputLayout);
+	ctx->IASetInputLayout(pInputLayout.Get());
+
+	ComPtr<ID3D11VertexShader> pVertexShader;
+	device->CreateVertexShader(g_main_VS, sizeof(g_main_VS), nullptr, &pVertexShader);
+	ctx->VSSetShader(pVertexShader.Get(), 0, 0);
+
+	// 光栅化
+	D3D11_VIEWPORT viewPort = {};
+	viewPort.TopLeftX = 0;
+	viewPort.TopLeftY = 0;
+	viewPort.Width = 1280;
+	viewPort.Height = 720;
+	viewPort.MaxDepth = 1;
+	viewPort.MinDepth = 0;
+	ctx->RSSetViewports(1, &viewPort);
+
+	// 像素着色器
+	ComPtr<ID3D11PixelShader> pPixelShader;
+	device->CreatePixelShader(g_main_PS, sizeof(g_main_PS), nullptr, &pPixelShader);
+	ctx->PSSetShader(pPixelShader.Get(), 0, 0);
+
+	// 输出合并
+	ComPtr<ID3D11Texture2D> backBuffer;
+	swapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&backBuffer);
+
+	CD3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc(D3D11_RTV_DIMENSION_TEXTURE2D, DXGI_FORMAT_R8G8B8A8_UNORM);
+	ComPtr<ID3D11RenderTargetView>  rtv;
+	device->CreateRenderTargetView(backBuffer.Get(), &renderTargetViewDesc, &rtv);
+	ID3D11RenderTargetView* rtvs[] = { rtv.Get() };
+	ctx->OMSetRenderTargets(1, rtvs, nullptr);
+
+	// Draw Call
+	ctx->DrawIndexed(indicesSize, 0, 0);
+
+	// 呈现
+	swapchain->Present(1, 0);
 }
 
 int WINAPI WinMain (
@@ -223,7 +284,7 @@ int WINAPI WinMain (
 	auto& bufferDesc = swapChainDesc.BufferDesc;
 	bufferDesc.Width = clientWidth;
 	bufferDesc.Height = clientHeight;
-	bufferDesc.Format = DXGI_FORMAT::DXGI_FORMAT_B8G8R8A8_UNORM;
+	bufferDesc.Format = DXGI_FORMAT::DXGI_FORMAT_R8G8B8A8_UNORM;
 	bufferDesc.RefreshRate.Numerator = 0;
 	bufferDesc.RefreshRate.Denominator = 0;
 	bufferDesc.Scaling = DXGI_MODE_SCALING_STRETCHED;
@@ -261,15 +322,9 @@ int WINAPI WinMain (
 			DispatchMessage(&msg);
 		}
 		else {
-			AVFrame* frame = RequestFrame(decoderParam);
+			
+			Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain.Get());
 
-			double framerate = (double)vcodecCtx->framerate.den / vcodecCtx->framerate.num;
-			// std::this_thread::sleep_until(currentTime + milliseconds((int)(framerate * 1000)));
-			currentTime = system_clock::now();
-
-			RenderHWFrame(window, frame);
-
-			av_frame_free(&frame);
 		}
 	}
 
