@@ -39,10 +39,6 @@ using std::wstring;
 
 using namespace std::chrono;
 
-struct Vertex {
-	float x; float y; float z;
-};
-
 string w2s(const wstring& wstr) {
 	int len = WideCharToMultiByte(CP_ACP, 0, wstr.c_str(), wstr.size(), NULL, 0, NULL, NULL);
 	string str(len, '\0');
@@ -152,11 +148,15 @@ void ReleaseDecoder(DecoderParam& param) {
 
 void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapchain) {
 	// ∂•µ„ ‰»Î
+	struct Vertex {
+		float x; float y; float z;
+	};
+
 	const Vertex vertices[] = {
-		{-1,		1,		0},
-		{1,			1,		0},
-		{1,			-1,		0},
-		{-1,		-1,		0},
+		{-1,	1,	0},
+		{1,		1,	0},
+		{1,		-1,	0},
+		{-1,	-1,	0},
 	};
 
 	D3D11_BUFFER_DESC bd = {};
