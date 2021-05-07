@@ -40,6 +40,15 @@ using std::wstring;
 
 using namespace std::chrono;
 
+struct Vertex {
+	float x; float y; float z;
+	struct
+	{
+		float u;
+		float v;
+	} tex;
+};
+
 string w2s(const wstring& wstr) {
 	int len = WideCharToMultiByte(CP_ACP, 0, wstr.c_str(), wstr.size(), NULL, 0, NULL, NULL);
 	string str(len, '\0');
@@ -84,6 +93,19 @@ struct DecoderParam
 	int width;
 	int height;
 	int videoStreamIndex;
+};
+
+struct ScenceParam {
+	ComPtr<ID3D11Buffer> pVertexBuffer;
+	ComPtr<ID3D11Buffer> pIndexBuffer;
+	ComPtr<ID3D11InputLayout> pInputLayout;
+	ComPtr<ID3D11VertexShader> pVertexShader;
+	ComPtr<ID3D11Texture2D> texture;
+	ComPtr<ID3D11ShaderResourceView> srv;
+	ComPtr<ID3D11SamplerState> pSampler;
+	ComPtr<ID3D11PixelShader> pPixelShader;
+
+	const UINT16 indices[6]{ 0,1,2, 0,2,3 };
 };
 
 void InitDecoder(const char* filePath, DecoderParam& param) {
@@ -147,17 +169,8 @@ void ReleaseDecoder(DecoderParam& param) {
 	avformat_close_input(&param.fmtCtx);
 }
 
-void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapchain) {
+void InitScence(ID3D11Device* device, ScenceParam& param) {
 	// 顶点输入
-	struct Vertex {
-		float x; float y; float z;
-		struct
-		{
-			float u;
-			float v;
-		} tex;
-	};
-
 	const Vertex vertices[] = {
 		{-1,	1,	0,	0,	0},
 		{1,		1,	0,	1,	0},
@@ -172,46 +185,75 @@ void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapch
 	D3D11_SUBRESOURCE_DATA sd = {};
 	sd.pSysMem = vertices;
 
-	ComPtr<ID3D11Buffer> pVertexBuffer;
-	device->CreateBuffer(&bd, &sd, &pVertexBuffer);
+	device->CreateBuffer(&bd, &sd, &param.pVertexBuffer);
 
-	UINT stride = sizeof(Vertex);
-	UINT offset = 0u;
-	ID3D11Buffer* vertexBuffers[] = { pVertexBuffer.Get() };
-	ctx->IASetVertexBuffers(0, 1, vertexBuffers, &stride, &offset);
-
-	//  顶点索引
-	const UINT16 indices[] = {
-		0,1,2, 0,2,3
-	};
-
-	auto indicesSize = std::size(indices);
 	D3D11_BUFFER_DESC ibd = {};
 	ibd.BindFlags = D3D11_BIND_INDEX_BUFFER;
-	ibd.ByteWidth = sizeof(indices);
+	ibd.ByteWidth = sizeof(param.indices);
 	ibd.StructureByteStride = sizeof(UINT16);
 	D3D11_SUBRESOURCE_DATA isd = {};
-	isd.pSysMem = indices;
+	isd.pSysMem = param.indices;
 
-	ComPtr<ID3D11Buffer> pIndexBuffer;
-	device->CreateBuffer(&ibd, &isd, &pIndexBuffer);
-	ctx->IASetIndexBuffer(pIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
-
-	// 告诉系统我们画的是三角形
-	ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	device->CreateBuffer(&ibd, &isd, &param.pIndexBuffer);
 
 	// 顶点着色器
 	D3D11_INPUT_ELEMENT_DESC ied[] = {
 		{"POSITION", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
 		{"TEXCOORD", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0}
 	};
-	ComPtr<ID3D11InputLayout> pInputLayout;
-	device->CreateInputLayout(ied, std::size(ied), g_main_VS, sizeof(g_main_VS), &pInputLayout);
-	ctx->IASetInputLayout(pInputLayout.Get());
 
-	ComPtr<ID3D11VertexShader> pVertexShader;
-	device->CreateVertexShader(g_main_VS, sizeof(g_main_VS), nullptr, &pVertexShader);
-	ctx->VSSetShader(pVertexShader.Get(), 0, 0);
+	device->CreateInputLayout(ied, std::size(ied), g_main_VS, sizeof(g_main_VS), &param.pInputLayout);
+	device->CreateVertexShader(g_main_VS, sizeof(g_main_VS), nullptr, &param.pVertexShader);
+
+	// 纹理创建
+	D3D11_TEXTURE2D_DESC tdesc = {};
+	tdesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	tdesc.Width = 32;
+	tdesc.Height = 32;
+	tdesc.ArraySize = 1;
+	tdesc.MipLevels = 1;
+	tdesc.SampleDesc = { 1, 0 };
+	tdesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	D3D11_SUBRESOURCE_DATA tdata = { STAR_RGBA_DATA, 32 * 4, 0 };
+
+	device->CreateTexture2D(&tdesc, &tdata, &param.texture);
+
+	// 创建着色器资源
+	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = CD3D11_SHADER_RESOURCE_VIEW_DESC(
+		param.texture.Get(),
+		D3D11_SRV_DIMENSION_TEXTURE2D,
+		DXGI_FORMAT_R8G8B8A8_UNORM
+	);
+
+	device->CreateShaderResourceView(param.texture.Get(), &srvDesc, &param.srv);
+
+	// 创建采样器
+	D3D11_SAMPLER_DESC samplerDesc = {};
+	samplerDesc.Filter = D3D11_FILTER::D3D11_FILTER_ANISOTROPIC;
+	samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+	samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+	samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+	samplerDesc.MaxAnisotropy = 16;
+
+	device->CreateSamplerState(&samplerDesc, &param.pSampler);
+
+	// 像素着色器
+	device->CreatePixelShader(g_main_PS, sizeof(g_main_PS), nullptr, &param.pPixelShader);
+}
+
+void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapchain, ScenceParam& param) {
+	UINT stride = sizeof(Vertex);
+	UINT offset = 0u;
+	ID3D11Buffer* vertexBuffers[] = { param.pVertexBuffer.Get() };
+	ctx->IASetVertexBuffers(0, 1, vertexBuffers, &stride, &offset);
+
+	ctx->IASetIndexBuffer(param.pIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
+
+	ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	ctx->IASetInputLayout(param.pInputLayout.Get());
+
+	ctx->VSSetShader(param.pVertexShader.Get(), 0, 0);
 
 	// 光栅化
 	D3D11_VIEWPORT viewPort = {};
@@ -223,47 +265,10 @@ void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapch
 	viewPort.MinDepth = 0;
 	ctx->RSSetViewports(1, &viewPort);
 
-	// 纹理创建
-	ComPtr<ID3D11Texture2D> texture;
-	D3D11_TEXTURE2D_DESC tdesc = {};
-	tdesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	tdesc.Width = 32;
-	tdesc.Height = 32;
-	tdesc.ArraySize = 1;
-	tdesc.MipLevels = 1;
-	tdesc.SampleDesc = { 1, 0 };
-	tdesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-	D3D11_SUBRESOURCE_DATA tdata = { STAR_RGBA_DATA, 32 * 4, 0};
-
-	device->CreateTexture2D(&tdesc, &tdata, &texture);
-
-	// 创建着色器资源
-	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = CD3D11_SHADER_RESOURCE_VIEW_DESC(
-		texture.Get(),
-		D3D11_SRV_DIMENSION_TEXTURE2D,
-		DXGI_FORMAT_R8G8B8A8_UNORM
-	);
-	ComPtr<ID3D11ShaderResourceView> srv;
-	device->CreateShaderResourceView(texture.Get(), &srvDesc, &srv);
-
-	// 创建采样器
-	D3D11_SAMPLER_DESC samplerDesc = {};
-	samplerDesc.Filter = D3D11_FILTER::D3D11_FILTER_ANISOTROPIC;
-	samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
-	samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
-	samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
-	samplerDesc.MaxAnisotropy = 16;
-	ComPtr<ID3D11SamplerState> pSampler;
-	device->CreateSamplerState(&samplerDesc, &pSampler);
-
-	// 像素着色器
-	ComPtr<ID3D11PixelShader> pPixelShader;
-	device->CreatePixelShader(g_main_PS, sizeof(g_main_PS), nullptr, &pPixelShader);
-	ctx->PSSetShader(pPixelShader.Get(), 0, 0);
-	ID3D11ShaderResourceView* srvs[] = { srv.Get() };
+	ctx->PSSetShader(param.pPixelShader.Get(), 0, 0);
+	ID3D11ShaderResourceView* srvs[] = { param.srv.Get() };
 	ctx->PSSetShaderResources(0, 1, srvs);
-	ID3D11SamplerState* samplers[] = { pSampler.Get() };
+	ID3D11SamplerState* samplers[] = { param.pSampler.Get() };
 	ctx->PSSetSamplers(0, 1, samplers);
 
 	// 输出合并
@@ -277,6 +282,7 @@ void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapch
 	ctx->OMSetRenderTargets(1, rtvs, nullptr);
 
 	// Draw Call
+	auto indicesSize = std::size(param.indices);
 	ctx->DrawIndexed(indicesSize, 0, 0);
 
 	// 呈现
@@ -354,6 +360,9 @@ int WINAPI WinMain (
 	ComPtr<ID3D11DeviceContext> d3ddeviceCtx;
 	D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, flags, NULL, NULL, D3D11_SDK_VERSION, &swapChainDesc, &swapChain, &d3ddeivce, NULL, &d3ddeviceCtx);
 	
+	ScenceParam scenceParam;
+	InitScence(d3ddeivce.Get(), scenceParam);
+
 	auto currentTime = system_clock::now();
 
 	MSG msg;
@@ -368,7 +377,7 @@ int WINAPI WinMain (
 		}
 		else {
 			
-			Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain.Get());
+			Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain.Get(), scenceParam);
 
 		}
 	}
