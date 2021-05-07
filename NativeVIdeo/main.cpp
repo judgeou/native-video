@@ -30,6 +30,7 @@ extern "C" {
 
 #include "VertexShader.h"
 #include "PixelShader.h"
+#include "star.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -222,10 +223,48 @@ void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapch
 	viewPort.MinDepth = 0;
 	ctx->RSSetViewports(1, &viewPort);
 
+	// 纹理创建
+	ComPtr<ID3D11Texture2D> texture;
+	D3D11_TEXTURE2D_DESC tdesc = {};
+	tdesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	tdesc.Width = 32;
+	tdesc.Height = 32;
+	tdesc.ArraySize = 1;
+	tdesc.MipLevels = 1;
+	tdesc.SampleDesc = { 1, 0 };
+	tdesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+	D3D11_SUBRESOURCE_DATA tdata = { STAR_RGBA_DATA, 32 * 4, 0};
+
+	device->CreateTexture2D(&tdesc, &tdata, &texture);
+
+	// 创建着色器资源
+	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = CD3D11_SHADER_RESOURCE_VIEW_DESC(
+		texture.Get(),
+		D3D11_SRV_DIMENSION_TEXTURE2D,
+		DXGI_FORMAT_R8G8B8A8_UNORM
+	);
+	ComPtr<ID3D11ShaderResourceView> srv;
+	device->CreateShaderResourceView(texture.Get(), &srvDesc, &srv);
+
+	// 创建采样器
+	D3D11_SAMPLER_DESC samplerDesc = {};
+	samplerDesc.Filter = D3D11_FILTER::D3D11_FILTER_ANISOTROPIC;
+	samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+	samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+	samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+	samplerDesc.MaxAnisotropy = 16;
+	ComPtr<ID3D11SamplerState> pSampler;
+	device->CreateSamplerState(&samplerDesc, &pSampler);
+
 	// 像素着色器
 	ComPtr<ID3D11PixelShader> pPixelShader;
 	device->CreatePixelShader(g_main_PS, sizeof(g_main_PS), nullptr, &pPixelShader);
 	ctx->PSSetShader(pPixelShader.Get(), 0, 0);
+	ID3D11ShaderResourceView* srvs[] = { srv.Get() };
+	ctx->PSSetShaderResources(0, 1, srvs);
+	ID3D11SamplerState* samplers[] = { pSampler.Get() };
+	ctx->PSSetSamplers(0, 1, samplers);
 
 	// 输出合并
 	ComPtr<ID3D11Texture2D> backBuffer;

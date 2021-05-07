@@ -175,6 +175,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="PixelShader.h" />
+    <ClInclude Include="star.h" />
     <ClInclude Include="VertexShader.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
