@@ -152,8 +152,8 @@ void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapch
 		float x; float y; float z;
 		struct
 		{
-			float x;
-			float y;
+			float u;
+			float v;
 		} tex;
 	};
 
