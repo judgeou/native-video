@@ -150,13 +150,18 @@ void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapch
 	// 顶点输入
 	struct Vertex {
 		float x; float y; float z;
+		struct
+		{
+			float x;
+			float y;
+		} tex;
 	};
 
 	const Vertex vertices[] = {
-		{-1,	1,	0},
-		{1,		1,	0},
-		{1,		-1,	0},
-		{-1,	-1,	0},
+		{-1,	1,	0,	0,	0},
+		{1,		1,	0,	1,	0},
+		{1,		-1,	0,	1,	1},
+		{-1,	-1,	0,	0,	1},
 	};
 
 	D3D11_BUFFER_DESC bd = {};
@@ -196,7 +201,8 @@ void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapch
 
 	// 顶点着色器
 	D3D11_INPUT_ELEMENT_DESC ied[] = {
-		{"POSITION", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0}
+		{"POSITION", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+		{"TEXCOORD", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0}
 	};
 	ComPtr<ID3D11InputLayout> pInputLayout;
 	device->CreateInputLayout(ied, std::size(ied), g_main_VS, sizeof(g_main_VS), &pInputLayout);
