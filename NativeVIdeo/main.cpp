@@ -311,9 +311,6 @@ void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapch
 	// Draw Call
 	auto indicesSize = std::size(param.indices);
 	ctx->DrawIndexed(indicesSize, 0, 0);
-
-	// 呈现
-	swapchain->Present(1, 0);
 }
 
 void UpdateVideoTexture(AVFrame* frame, const ScenceParam& scenceParam, const DecoderParam& decoderParam) {
@@ -409,7 +406,18 @@ int WINAPI WinMain (
 	
 	InitScence(d3ddeivce.Get(), scenceParam, decoderParam);
 
-	auto currentTime = system_clock::now();
+	DEVMODE devMode = {};
+	devMode.dmSize = sizeof(devMode);
+	EnumDisplaySettings(NULL, ENUM_CURRENT_SETTINGS, &devMode);
+	// 屏幕刷新率
+	auto displayFreq = devMode.dmDisplayFrequency;
+
+	// 记录屏幕呈现了多少帧
+	int displayCount = 1;
+	// 记录视频播放了多少帧
+	int frameCount = 1;
+
+	auto frame = RequestFrame(decoderParam);
 
 	MSG msg;
 	while (1) {
@@ -422,10 +430,21 @@ int WINAPI WinMain (
 			DispatchMessage(&msg);
 		}
 		else {
-			auto frame = RequestFrame(decoderParam);
-			UpdateVideoTexture(frame, scenceParam, decoderParam);
+			double frameFreq = (double)vcodecCtx->framerate.num / vcodecCtx->framerate.den;
+			double freqRatio = displayFreq / frameFreq;
+			double countRatio = (double)displayCount / frameCount;
+			
+			if (freqRatio < countRatio) {
+				frame = RequestFrame(decoderParam);
+				UpdateVideoTexture(frame, scenceParam, decoderParam);
+				frameCount++;
+				av_frame_free(&frame);
+			}
+
 			Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain.Get(), scenceParam);
-			av_frame_free(&frame);
+			
+			swapChain->Present(1, 0);
+			displayCount++;	
 		}
 	}
 
