@@ -291,8 +291,10 @@ void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapch
 	ctx->RSSetViewports(1, &viewPort);
 
 	ctx->PSSetShader(param.pPixelShader.Get(), 0, 0);
+	
 	ID3D11ShaderResourceView* srvs[] = { param.srvY.Get(), param.srvUV.Get() };
-	ctx->PSSetShaderResources(0, 1, srvs);
+	ctx->PSSetShaderResources(0, std::size(srvs), srvs);
+
 	ID3D11SamplerState* samplers[] = { param.pSampler.Get() };
 	ctx->PSSetSamplers(0, 1, samplers);
 
