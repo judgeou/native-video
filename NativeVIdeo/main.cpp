@@ -100,8 +100,12 @@ struct ScenceParam {
 	ComPtr<ID3D11Buffer> pIndexBuffer;
 	ComPtr<ID3D11InputLayout> pInputLayout;
 	ComPtr<ID3D11VertexShader> pVertexShader;
+	
 	ComPtr<ID3D11Texture2D> texture;
-	ComPtr<ID3D11ShaderResourceView> srv;
+	HANDLE sharedHandle;
+	ComPtr<ID3D11ShaderResourceView> srvY;
+	ComPtr<ID3D11ShaderResourceView> srvUV;
+
 	ComPtr<ID3D11SamplerState> pSampler;
 	ComPtr<ID3D11PixelShader> pPixelShader;
 
@@ -126,7 +130,7 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 
 	// 启用硬件解码器
 	AVBufferRef* hw_device_ctx = nullptr;
-	av_hwdevice_ctx_create(&hw_device_ctx, AVHWDeviceType::AV_HWDEVICE_TYPE_DXVA2, NULL, NULL, NULL);
+	av_hwdevice_ctx_create(&hw_device_ctx, AVHWDeviceType::AV_HWDEVICE_TYPE_D3D11VA, NULL, NULL, NULL);
 	vcodecCtx->hw_device_ctx = hw_device_ctx;
 
 	param.fmtCtx = fmtCtx;
@@ -169,7 +173,7 @@ void ReleaseDecoder(DecoderParam& param) {
 	avformat_close_input(&param.fmtCtx);
 }
 
-void InitScence(ID3D11Device* device, ScenceParam& param) {
+void InitScence(ID3D11Device* device, ScenceParam& param, const DecoderParam& decoderParam) {
 	// 顶点输入
 	const Vertex vertices[] = {
 		{-1,	1,	0,	0,	0},
@@ -207,25 +211,46 @@ void InitScence(ID3D11Device* device, ScenceParam& param) {
 
 	// 纹理创建
 	D3D11_TEXTURE2D_DESC tdesc = {};
-	tdesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	tdesc.Width = 32;
-	tdesc.Height = 32;
+	tdesc.Format = DXGI_FORMAT_NV12;
+	tdesc.Usage = D3D11_USAGE_DEFAULT;
+	tdesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED;
 	tdesc.ArraySize = 1;
 	tdesc.MipLevels = 1;
 	tdesc.SampleDesc = { 1, 0 };
+	tdesc.Height = decoderParam.height;
+	tdesc.Width = decoderParam.width;
 	tdesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-	D3D11_SUBRESOURCE_DATA tdata = { STAR_RGBA_DATA, 32 * 4, 0 };
+	device->CreateTexture2D(&tdesc, nullptr, &param.texture);
 
-	device->CreateTexture2D(&tdesc, &tdata, &param.texture);
+	// 创建纹理共享句柄
+	ComPtr<IDXGIResource> dxgiShareTexture;
+	param.texture->QueryInterface(__uuidof(IDXGIResource), (void**)dxgiShareTexture.GetAddressOf());
+	dxgiShareTexture->GetSharedHandle(&param.sharedHandle);
 
 	// 创建着色器资源
-	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = CD3D11_SHADER_RESOURCE_VIEW_DESC(
+	D3D11_SHADER_RESOURCE_VIEW_DESC const YPlaneDesc = CD3D11_SHADER_RESOURCE_VIEW_DESC(
 		param.texture.Get(),
 		D3D11_SRV_DIMENSION_TEXTURE2D,
-		DXGI_FORMAT_R8G8B8A8_UNORM
+		DXGI_FORMAT_R8_UNORM
 	);
 
-	device->CreateShaderResourceView(param.texture.Get(), &srvDesc, &param.srv);
+	device->CreateShaderResourceView(
+		param.texture.Get(),
+		&YPlaneDesc,
+		&param.srvY
+	);
+
+	D3D11_SHADER_RESOURCE_VIEW_DESC const UVPlaneDesc = CD3D11_SHADER_RESOURCE_VIEW_DESC(
+		param.texture.Get(),
+		D3D11_SRV_DIMENSION_TEXTURE2D,
+		DXGI_FORMAT_R8G8_UNORM
+	);
+
+	device->CreateShaderResourceView(
+		param.texture.Get(),
+		&UVPlaneDesc,
+		&param.srvUV
+	);
 
 	// 创建采样器
 	D3D11_SAMPLER_DESC samplerDesc = {};
@@ -266,7 +291,7 @@ void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapch
 	ctx->RSSetViewports(1, &viewPort);
 
 	ctx->PSSetShader(param.pPixelShader.Get(), 0, 0);
-	ID3D11ShaderResourceView* srvs[] = { param.srv.Get() };
+	ID3D11ShaderResourceView* srvs[] = { param.srvY.Get(), param.srvUV.Get() };
 	ctx->PSSetShaderResources(0, 1, srvs);
 	ID3D11SamplerState* samplers[] = { param.pSampler.Get() };
 	ctx->PSSetSamplers(0, 1, samplers);
@@ -287,6 +312,23 @@ void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapch
 
 	// 呈现
 	swapchain->Present(1, 0);
+}
+
+void UpdateVideoTexture(AVFrame* frame, const ScenceParam& scenceParam, const DecoderParam& decoderParam) {
+	ID3D11Texture2D* t_frame = (ID3D11Texture2D*)frame->data[0];
+	int t_index = (int)frame->data[1];
+
+	ComPtr<ID3D11Device> device;
+	t_frame->GetDevice(device.GetAddressOf());
+
+	ComPtr<ID3D11DeviceContext> deviceCtx;
+	device->GetImmediateContext(&deviceCtx);
+
+	ComPtr<ID3D11Texture2D> videoTexture;
+	device->OpenSharedResource(scenceParam.sharedHandle, __uuidof(ID3D11Texture2D), (void**)&videoTexture);
+
+	deviceCtx->CopySubresourceRegion(videoTexture.Get(), 0, 0, 0, 0, t_frame, t_index, 0);
+	deviceCtx->Flush();
 }
 
 int WINAPI WinMain (
@@ -318,7 +360,10 @@ int WINAPI WinMain (
 	RegisterClass(&wndClass);
 
 	DecoderParam decoderParam;
+	ScenceParam scenceParam;
+
 	InitDecoder(filePath.c_str(), decoderParam);
+
 	auto& width = decoderParam.width;
 	auto& height = decoderParam.height;
 	auto& fmtCtx = decoderParam.fmtCtx;
@@ -360,8 +405,7 @@ int WINAPI WinMain (
 	ComPtr<ID3D11DeviceContext> d3ddeviceCtx;
 	D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, flags, NULL, NULL, D3D11_SDK_VERSION, &swapChainDesc, &swapChain, &d3ddeivce, NULL, &d3ddeviceCtx);
 	
-	ScenceParam scenceParam;
-	InitScence(d3ddeivce.Get(), scenceParam);
+	InitScence(d3ddeivce.Get(), scenceParam, decoderParam);
 
 	auto currentTime = system_clock::now();
 
@@ -376,9 +420,10 @@ int WINAPI WinMain (
 			DispatchMessage(&msg);
 		}
 		else {
-			
+			auto frame = RequestFrame(decoderParam);
+			UpdateVideoTexture(frame, scenceParam, decoderParam);
 			Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain.Get(), scenceParam);
-
+			av_frame_free(&frame);
 		}
 	}
 
