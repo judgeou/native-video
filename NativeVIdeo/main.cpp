@@ -330,6 +330,18 @@ void UpdateVideoTexture(AVFrame* frame, const ScenceParam& scenceParam, const De
 	deviceCtx->Flush();
 }
 
+double GetFrameFreq(const DecoderParam& param) {
+	auto avg_frame_rate = param.fmtCtx->streams[param.videoStreamIndex]->avg_frame_rate;
+	auto framerate = param.vcodecCtx->framerate;
+
+	if (avg_frame_rate.num > 0) {
+		return (double)avg_frame_rate.num / avg_frame_rate.den;
+	}
+	else if (framerate.num > 0) {
+		return (double)framerate.num / framerate.den;
+	}
+}
+
 int WINAPI WinMain (
 	_In_ HINSTANCE hInstance,
 	_In_opt_ HINSTANCE hPrevInstance,
@@ -413,11 +425,9 @@ int WINAPI WinMain (
 	auto displayFreq = devMode.dmDisplayFrequency;
 
 	// 记录屏幕呈现了多少帧
-	int displayCount = 1;
+	int displayCount = 0;
 	// 记录视频播放了多少帧
 	int frameCount = 1;
-
-	auto frame = RequestFrame(decoderParam);
 
 	MSG msg;
 	while (1) {
@@ -430,14 +440,18 @@ int WINAPI WinMain (
 			DispatchMessage(&msg);
 		}
 		else {
-			double frameFreq = (double)vcodecCtx->framerate.num / vcodecCtx->framerate.den;
+			double frameFreq = GetFrameFreq(decoderParam);
 			double freqRatio = displayFreq / frameFreq;
 			double countRatio = (double)displayCount / frameCount;
 			
-			if (freqRatio < countRatio) {
-				frame = RequestFrame(decoderParam);
-				UpdateVideoTexture(frame, scenceParam, decoderParam);
+			while (freqRatio < countRatio) {
+				auto frame = RequestFrame(decoderParam);
 				frameCount++;
+				countRatio = (double)displayCount / frameCount;
+
+				if (freqRatio >= countRatio) {
+					UpdateVideoTexture(frame, scenceParam, decoderParam);
+				}
 				av_frame_free(&frame);
 			}
 
