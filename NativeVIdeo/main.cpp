@@ -30,6 +30,10 @@ extern "C" {
 #include <DirectXMath.h>
 namespace dx = DirectX;
 
+#include "imgui/backends/imgui_impl_win32.h"
+#include "imgui/backends/imgui_impl_dx11.h"
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
 #include "VertexShader.h"
 #include "PixelShader.h"
 #include "star.h"
@@ -179,7 +183,7 @@ void ReleaseDecoder(DecoderParam& param) {
 	avformat_close_input(&param.fmtCtx);
 }
 
-void InitScence(ID3D11Device* device, ScenceParam& param, const DecoderParam& decoderParam) {
+void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& param, const DecoderParam& decoderParam) {
 	// 顶点输入
 	const Vertex vertices[] = {
 		{-1,	1,	0,	0,	0},
@@ -284,6 +288,9 @@ void InitScence(ID3D11Device* device, ScenceParam& param, const DecoderParam& de
 
 	// 像素着色器
 	device->CreatePixelShader(g_main_PS, sizeof(g_main_PS), nullptr, &param.pPixelShader);
+
+	// imgui
+	ImGui_ImplDX11_Init(device, ctx);
 }
 
 // 通过窗口比例与视频比例的计算，得出合适的缩放矩阵，写入常量缓冲。
@@ -372,6 +379,16 @@ void Draw(
 	// Draw Call
 	auto indicesSize = std::size(param.indices);
 	ctx->DrawIndexed(indicesSize, 0, 0);
+
+	ImGui_ImplDX11_NewFrame();
+	ImGui_ImplWin32_NewFrame();
+	ImGui::NewFrame();
+
+	static bool isShow = true;
+	ImGui::ShowDemoWindow(&isShow);
+
+	ImGui::Render();
+	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 }
 
 void UpdateVideoTexture(AVFrame* frame, const ScenceParam& scenceParam, const DecoderParam& decoderParam) {
@@ -419,6 +436,8 @@ int WINAPI WinMain (
 	wndClass.hInstance = hInstance;
 	wndClass.lpszClassName = className;
 	wndClass.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT {
+		ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
+
 		switch (msg)
 		{
 		case WM_SIZE:
@@ -523,7 +542,10 @@ int WINAPI WinMain (
 	scenceParam.viewWidth = clientWidth;
 	scenceParam.viewHeight = clientHeight;
 
-	InitScence(d3ddeivce.Get(), scenceParam, decoderParam);
+	auto imguiCtx = ImGui::CreateContext();
+	ImGui_ImplWin32_Init(window);
+
+	InitScence(d3ddeivce.Get(), d3ddeviceCtx.Get(), scenceParam, decoderParam);
 
 	DEVMODE devMode = {};
 	devMode.dmSize = sizeof(devMode);
