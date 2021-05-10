@@ -428,8 +428,33 @@ int WINAPI WinMain (
 				auto width = GET_X_LPARAM(lParam);
 				auto height = GET_Y_LPARAM(lParam);
 
+				// 专门处理从全屏恢复到窗口的特殊情况
+				if ((GetWindowLongPtr(hwnd, GWL_STYLE) == (WS_VISIBLE | WS_POPUP | WS_CLIPSIBLINGS))) {
+					RECT clientRect = { 0, 0, 0, 0 };
+					AdjustWindowRect(&clientRect, WS_OVERLAPPEDWINDOW, FALSE);
+					width = width - (clientRect.right - clientRect.left);
+					height = height - (clientRect.bottom - clientRect.top);
+				}
+
 				scenceParam->viewWidth = width;
 				scenceParam->viewHeight = height;
+			}
+			return 0;
+		}
+		case WM_KEYUP:
+		{
+			if (wParam == VK_RETURN) {
+				static bool isMax = false;
+				if (isMax) {
+					isMax = false;
+					SendMessage(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
+					SetWindowLongPtr(hwnd, GWL_STYLE, WS_VISIBLE | WS_OVERLAPPEDWINDOW);
+				}
+				else {
+					isMax = true;
+					SetWindowLongPtr(hwnd, GWL_STYLE, WS_VISIBLE | WS_POPUP);
+					SendMessage(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+				}
 			}
 			return 0;
 		}
