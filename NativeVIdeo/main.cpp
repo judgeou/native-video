@@ -376,6 +376,9 @@ void Draw(
 	ID3D11RenderTargetView* rtvs[] = { rtv.Get() };
 	ctx->OMSetRenderTargets(1, rtvs, nullptr);
 
+	const FLOAT black[] = { 0, 0, 0, 1 };
+	ctx->ClearRenderTargetView(rtv.Get(), black);
+
 	// Draw Call
 	auto indicesSize = std::size(param.indices);
 	ctx->DrawIndexed(indicesSize, 0, 0);
@@ -590,6 +593,9 @@ int WINAPI WinMain (
 			displayCount++;	
 		}
 	}
+
+	ImGui_ImplDX11_Shutdown();
+	ImGui_ImplWin32_Shutdown();
 
 	ReleaseDecoder(decoderParam);
 
