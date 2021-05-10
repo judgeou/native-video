@@ -5,6 +5,7 @@
 #include <thread>
 
 #include <Windows.h>
+#include <windowsx.h>
 #include <ShlObj.h>
 #include <wrl.h>
 
@@ -24,9 +25,10 @@ extern "C" {
 
 #include <d3d9.h>
 #pragma comment(lib, "d3d9.lib")
-
 #include <d3d11.h>
 #pragma comment(lib, "d3d11.lib")
+#include <DirectXMath.h>
+namespace dx = DirectX;
 
 #include "VertexShader.h"
 #include "PixelShader.h"
@@ -98,6 +100,7 @@ struct DecoderParam
 struct ScenceParam {
 	ComPtr<ID3D11Buffer> pVertexBuffer;
 	ComPtr<ID3D11Buffer> pIndexBuffer;
+	ComPtr<ID3D11Buffer> pConstantBuffer;
 	ComPtr<ID3D11InputLayout> pInputLayout;
 	ComPtr<ID3D11VertexShader> pVertexShader;
 	
@@ -110,6 +113,9 @@ struct ScenceParam {
 	ComPtr<ID3D11PixelShader> pPixelShader;
 
 	const UINT16 indices[6]{ 0,1,2, 0,2,3 };
+
+	int viewWidth;
+	int viewHeight;
 };
 
 void InitDecoder(const char* filePath, DecoderParam& param) {
@@ -200,6 +206,20 @@ void InitScence(ID3D11Device* device, ScenceParam& param, const DecoderParam& de
 
 	device->CreateBuffer(&ibd, &isd, &param.pIndexBuffer);
 
+	// 常量缓冲区
+	auto constant = dx::XMMatrixScaling(1, 1, 1);
+	constant = dx::XMMatrixTranspose(constant);
+	D3D11_BUFFER_DESC cbd = {};
+	cbd.Usage = D3D11_USAGE_DYNAMIC;
+	cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	cbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	cbd.ByteWidth = sizeof(constant);
+	cbd.StructureByteStride = 0;
+	D3D11_SUBRESOURCE_DATA csd = {};
+	csd.pSysMem = &constant;
+	
+	device->CreateBuffer(&cbd, &csd, &param.pConstantBuffer);
+
 	// 顶点着色器
 	D3D11_INPUT_ELEMENT_DESC ied[] = {
 		{"POSITION", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
@@ -266,7 +286,36 @@ void InitScence(ID3D11Device* device, ScenceParam& param, const DecoderParam& de
 	device->CreatePixelShader(g_main_PS, sizeof(g_main_PS), nullptr, &param.pPixelShader);
 }
 
-void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapchain, ScenceParam& param) {
+// 通过窗口比例与视频比例的计算，得出合适的缩放矩阵，写入常量缓冲。
+void FitQuadSize(
+	ID3D11DeviceContext* ctx, ID3D11Buffer* constant,
+	int videoWidth, int videoHeight, int viewWidth, int viewHeight
+) {
+	double videoRatio = (double)videoWidth / videoHeight;
+	double viewRatio = (double)viewWidth / viewHeight;
+	dx::XMMATRIX matrix;
+
+	if (videoRatio > viewRatio) {
+		matrix = dx::XMMatrixScaling(1, viewRatio / videoRatio, 1);
+	}
+	else if (videoRatio < viewRatio) {
+		matrix = dx::XMMatrixScaling(videoRatio / viewRatio, 1, 1);
+	}
+	else {
+		matrix = dx::XMMatrixScaling(1, 1, 1);
+	}
+	matrix = dx::XMMatrixTranspose(matrix);
+
+	D3D11_MAPPED_SUBRESOURCE mapped;
+	ctx->Map(constant, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+	memcpy(mapped.pData, &matrix, sizeof(matrix));
+	ctx->Unmap(constant, 0);
+}
+
+void Draw(
+	ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapchain,
+	ScenceParam& param, const DecoderParam& decoderParam
+) {
 	UINT stride = sizeof(Vertex);
 	UINT offset = 0u;
 	ID3D11Buffer* vertexBuffers[] = { param.pVertexBuffer.Get() };
@@ -278,14 +327,18 @@ void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapch
 
 	ctx->IASetInputLayout(param.pInputLayout.Get());
 
+	FitQuadSize(ctx, param.pConstantBuffer.Get(), decoderParam.width, decoderParam.height, param.viewWidth, param.viewHeight);
+	ID3D11Buffer* cbs[] = { param.pConstantBuffer.Get() };
+	ctx->VSSetConstantBuffers(0, 1, cbs);
+
 	ctx->VSSetShader(param.pVertexShader.Get(), 0, 0);
 
 	// 光栅化
 	D3D11_VIEWPORT viewPort = {};
 	viewPort.TopLeftX = 0;
 	viewPort.TopLeftY = 0;
-	viewPort.Width = 1280;
-	viewPort.Height = 720;
+	viewPort.Width = param.viewWidth;
+	viewPort.Height = param.viewHeight;
 	viewPort.MaxDepth = 1;
 	viewPort.MinDepth = 0;
 	ctx->RSSetViewports(1, &viewPort);
@@ -297,6 +350,14 @@ void Draw(ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapch
 
 	ID3D11SamplerState* samplers[] = { param.pSampler.Get() };
 	ctx->PSSetSamplers(0, 1, samplers);
+
+	// 必要时重新创建交换链
+	DXGI_SWAP_CHAIN_DESC swapDesc;
+	swapchain->GetDesc(&swapDesc);
+	auto& bufferDesc = swapDesc.BufferDesc;
+	if (bufferDesc.Width != param.viewWidth || bufferDesc.Height != param.viewHeight) {
+		swapchain->ResizeBuffers(swapDesc.BufferCount, param.viewWidth, param.viewHeight, bufferDesc.Format, swapDesc.Flags);
+	}
 
 	// 输出合并
 	ComPtr<ID3D11Texture2D> backBuffer;
@@ -360,6 +421,18 @@ int WINAPI WinMain (
 	wndClass.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT {
 		switch (msg)
 		{
+		case WM_SIZE:
+		{
+			auto scenceParam = (ScenceParam*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+			if (scenceParam) {
+				auto width = GET_X_LPARAM(lParam);
+				auto height = GET_Y_LPARAM(lParam);
+
+				scenceParam->viewWidth = width;
+				scenceParam->viewHeight = height;
+			}
+			return 0;
+		}
 		case WM_DESTROY:
 			PostQuitMessage(0);
 			return 0;
@@ -380,11 +453,17 @@ int WINAPI WinMain (
 	auto& fmtCtx = decoderParam.fmtCtx;
 	auto& vcodecCtx = decoderParam.vcodecCtx;
 
-	int clientWidth = 1280;
-	int clientHeight = 720;
-	auto window = CreateWindow(className, L"Hello World 标题", WS_POPUP, 100, 100, clientWidth, clientHeight, NULL, NULL, hInstance, NULL);
+	int windowWidth = 1280;
+	int windowHeight = 720;
+	auto window = CreateWindow(className, L"Hello World 标题", WS_OVERLAPPEDWINDOW, 100, 100, windowWidth, windowHeight, NULL, NULL, hInstance, NULL);
+	
+	RECT clientRect;
+	GetClientRect(window, &clientRect);
+	int clientWidth = clientRect.right - clientRect.left;
+	int clientHeight = clientRect.bottom - clientRect.top;
 
 	ShowWindow(window, SW_SHOW);
+	SetWindowLongPtr(window, GWLP_USERDATA, (LONG_PTR)&scenceParam);
 
 	// D3D11
 	DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
@@ -416,6 +495,9 @@ int WINAPI WinMain (
 	ComPtr<ID3D11DeviceContext> d3ddeviceCtx;
 	D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, flags, NULL, NULL, D3D11_SDK_VERSION, &swapChainDesc, &swapChain, &d3ddeivce, NULL, &d3ddeviceCtx);
 	
+	scenceParam.viewWidth = clientWidth;
+	scenceParam.viewHeight = clientHeight;
+
 	InitScence(d3ddeivce.Get(), scenceParam, decoderParam);
 
 	DEVMODE devMode = {};
@@ -455,7 +537,7 @@ int WINAPI WinMain (
 				av_frame_free(&frame);
 			}
 
-			Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain.Get(), scenceParam);
+			Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain.Get(), scenceParam, decoderParam);
 			
 			swapChain->Present(1, 0);
 			displayCount++;	
