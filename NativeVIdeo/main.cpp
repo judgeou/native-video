@@ -104,6 +104,7 @@ struct DecoderParam
 	float currentSecond;
 	bool isJumpProgress;
 	int playStatus;
+	system_clock::time_point mouseStopTime;
 };
 
 struct ScenceParam {
@@ -337,30 +338,40 @@ void DrawImgui(
 
 	// 这里开始写界面逻辑
 	// ImGui::ShowDemoWindow();
-	if (ImGui::Begin("Play")) {
-		auto& playStatus = decoderParam.playStatus;
-		if (playStatus == 0) {
-			if (ImGui::Button("Pause")) {
-				playStatus = 1;
-			}
-		}
-		else if (playStatus == 1 || playStatus == 2) {
-			if (ImGui::Button("Play")) {
-				playStatus = 0;
-			}
-		}
-		ImGui::SameLine();
-
-		ImGui::PushItemWidth(700);
-		if (ImGui::SliderFloat("time", &decoderParam.currentSecond, 0, decoderParam.durationSecond)) {
-			decoderParam.isJumpProgress = true;
-		}
-		ImGui::PopItemWidth();
-		ImGui::SameLine();
-		ImGui::Text("%.3f", decoderParam.durationSecond);
+	auto& io = ImGui::GetIO();
+	auto& mouseStopTime = decoderParam.mouseStopTime;
+	if (io.MouseDelta.y != 0 || io.MouseDelta.x != 0) {
+		mouseStopTime = system_clock::now();
 	}
-	ImGui::End();
-	
+
+	constexpr auto hideMouseDelay = 1s;
+	bool isShowWidgets = ((system_clock::now() - mouseStopTime) < hideMouseDelay) || io.WantCaptureMouse;
+
+	if (isShowWidgets) {
+		if (ImGui::Begin("Play")) {
+			auto& playStatus = decoderParam.playStatus;
+			if (playStatus == 0) {
+				if (ImGui::Button("Pause")) {
+					playStatus = 1;
+				}
+			}
+			else if (playStatus == 1 || playStatus == 2) {
+				if (ImGui::Button("Play")) {
+					playStatus = 0;
+				}
+			}
+			ImGui::SameLine();
+
+			ImGui::PushItemWidth(700);
+			if (ImGui::SliderFloat("time", &decoderParam.currentSecond, 0, decoderParam.durationSecond)) {
+				decoderParam.isJumpProgress = true;
+			}
+			ImGui::PopItemWidth();
+			ImGui::SameLine();
+			ImGui::Text("%.3f", decoderParam.durationSecond);
+		}
+		ImGui::End();
+	}
 
 	ImGui::Render();
 	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
