@@ -151,6 +151,7 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 	param.vcodecCtx = vcodecCtx;
 	param.width = vcodecCtx->width;
 	param.height = vcodecCtx->height;
+	param.isJumpProgress = false;
 }
 
 AVFrame* RequestFrame(DecoderParam& param) {
@@ -585,7 +586,7 @@ int WINAPI WinMain (
 
 	decoderParam.durationSecond = (double)fmtCtx->duration / AV_TIME_BASE;
 	auto videoTimeBase = fmtCtx->streams[decoderParam.videoStreamIndex]->time_base;
-	double videoTimeBaseSecond = (double)videoTimeBase.num / videoTimeBase.den;
+	double videoTimeBaseDouble = (double)videoTimeBase.num / videoTimeBase.den;
 
 	MSG msg;
 	while (1) {
@@ -603,6 +604,16 @@ int WINAPI WinMain (
 			double countRatio = (double)displayCount / frameCount;
 			
 			while (freqRatio < countRatio || countRatio == 0) {
+				if (decoderParam.isJumpProgress) {
+					decoderParam.isJumpProgress = false;
+					auto& current = decoderParam.currentSecond;
+					int64_t jumpTimeStamp = current / videoTimeBaseDouble;
+					av_seek_frame(fmtCtx, decoderParam.videoStreamIndex, jumpTimeStamp, 0);
+
+					frameCount = current * frameFreq;
+					displayCount = current * displayFreq;
+				}
+
 				auto frame = RequestFrame(decoderParam);
 				frameCount++;
 				countRatio = (double)displayCount / frameCount;
