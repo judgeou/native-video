@@ -103,6 +103,7 @@ struct DecoderParam
 	float durationSecond;
 	float currentSecond;
 	bool isJumpProgress;
+	int playStatus;
 };
 
 struct ScenceParam {
@@ -151,7 +152,6 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 	param.vcodecCtx = vcodecCtx;
 	param.width = vcodecCtx->width;
 	param.height = vcodecCtx->height;
-	param.isJumpProgress = false;
 }
 
 AVFrame* RequestFrame(DecoderParam& param) {
@@ -338,6 +338,19 @@ void DrawImgui(
 	// 这里开始写界面逻辑
 	// ImGui::ShowDemoWindow();
 	if (ImGui::Begin("Play")) {
+		auto& playStatus = decoderParam.playStatus;
+		if (playStatus == 0) {
+			if (ImGui::Button("Pause")) {
+				playStatus = 1;
+			}
+		}
+		else if (playStatus == 1 || playStatus == 2) {
+			if (ImGui::Button("Play")) {
+				playStatus = 0;
+			}
+		}
+		ImGui::SameLine();
+
 		ImGui::PushItemWidth(700);
 		if (ImGui::SliderFloat("time", &decoderParam.currentSecond, 0, decoderParam.durationSecond)) {
 			decoderParam.isJumpProgress = true;
@@ -516,7 +529,7 @@ int WINAPI WinMain (
 
 	RegisterClass(&wndClass);
 
-	DecoderParam decoderParam;
+	DecoderParam decoderParam = {};
 	ScenceParam scenceParam;
 
 	InitDecoder(filePath.c_str(), decoderParam);
@@ -606,7 +619,7 @@ int WINAPI WinMain (
 			double freqRatio = displayFreq / frameFreq;
 			double countRatio = (double)displayCount / frameCount;
 			
-			while (freqRatio < countRatio) {
+			while (freqRatio < countRatio && decoderParam.playStatus == 0) {
 				if (decoderParam.isJumpProgress) {
 					decoderParam.isJumpProgress = false;
 					auto& current = decoderParam.currentSecond;
@@ -635,7 +648,9 @@ int WINAPI WinMain (
 			Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain.Get(), scenceParam, decoderParam);
 			
 			swapChain->Present(1, 0);
-			displayCount++;	
+			if (decoderParam.playStatus == 0) {
+				displayCount++;
+			}
 		}
 	}
 
