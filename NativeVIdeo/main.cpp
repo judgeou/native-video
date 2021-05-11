@@ -319,6 +319,21 @@ void FitQuadSize(
 	ctx->Unmap(constant, 0);
 }
 
+void DrawImgui(
+	ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapchain,
+	ScenceParam& param, const DecoderParam& decoderParam
+) {
+	ImGui_ImplDX11_NewFrame();
+	ImGui_ImplWin32_NewFrame();
+	ImGui::NewFrame();
+
+	// 这里开始写界面逻辑
+	ImGui::ShowDemoWindow();
+
+	ImGui::Render();
+	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+}
+
 void Draw(
 	ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapchain,
 	ScenceParam& param, const DecoderParam& decoderParam
@@ -383,15 +398,7 @@ void Draw(
 	auto indicesSize = std::size(param.indices);
 	ctx->DrawIndexed(indicesSize, 0, 0);
 
-	ImGui_ImplDX11_NewFrame();
-	ImGui_ImplWin32_NewFrame();
-	ImGui::NewFrame();
-
-	static bool isShow = true;
-	ImGui::ShowDemoWindow(&isShow);
-
-	ImGui::Render();
-	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+	DrawImgui(device, ctx, swapchain, param, decoderParam);
 }
 
 void UpdateVideoTexture(AVFrame* frame, const ScenceParam& scenceParam, const DecoderParam& decoderParam) {
