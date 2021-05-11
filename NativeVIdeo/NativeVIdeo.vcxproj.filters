@@ -45,6 +45,9 @@
     <ClCompile Include="imgui\backends\imgui_impl_win32.cpp">
       <Filter>源文件\imgui\backends</Filter>
     </ClCompile>
+    <ClCompile Include="AudioPlayer.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="VertexShader.hlsl">
@@ -87,6 +90,9 @@
     </ClInclude>
     <ClInclude Include="imgui\backends\imgui_impl_win32.h">
       <Filter>源文件\imgui\backends</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioPlayer.h">
+      <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

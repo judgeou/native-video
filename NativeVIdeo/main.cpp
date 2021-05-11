@@ -36,7 +36,8 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 #include "VertexShader.h"
 #include "PixelShader.h"
-#include "star.h"
+
+#include "AudioPlayer.h"
 
 using Microsoft::WRL::ComPtr;
 
