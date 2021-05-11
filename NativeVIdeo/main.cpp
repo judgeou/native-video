@@ -99,6 +99,10 @@ struct DecoderParam
 	int width;
 	int height;
 	int videoStreamIndex;
+
+	float durationSecond;
+	float currentSecond;
+	bool isJumpProgress;
 };
 
 struct ScenceParam {
@@ -321,14 +325,25 @@ void FitQuadSize(
 
 void DrawImgui(
 	ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapchain,
-	ScenceParam& param, const DecoderParam& decoderParam
+	ScenceParam& param, DecoderParam& decoderParam
 ) {
 	ImGui_ImplDX11_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
 
 	// 这里开始写界面逻辑
-	ImGui::ShowDemoWindow();
+	// ImGui::ShowDemoWindow();
+	if (ImGui::Begin("Play")) {
+		ImGui::PushItemWidth(700);
+		if (ImGui::SliderFloat("time", &decoderParam.currentSecond, 0, decoderParam.durationSecond)) {
+			decoderParam.isJumpProgress = true;
+		}
+		ImGui::PopItemWidth();
+		ImGui::SameLine();
+		ImGui::Text("%.3f", decoderParam.durationSecond);
+	}
+	ImGui::End();
+	
 
 	ImGui::Render();
 	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
@@ -336,7 +351,7 @@ void DrawImgui(
 
 void Draw(
 	ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapchain,
-	ScenceParam& param, const DecoderParam& decoderParam
+	ScenceParam& param, DecoderParam& decoderParam
 ) {
 	UINT stride = sizeof(Vertex);
 	UINT offset = 0u;
@@ -566,7 +581,11 @@ int WINAPI WinMain (
 	// 记录屏幕呈现了多少帧
 	int displayCount = 0;
 	// 记录视频播放了多少帧
-	int frameCount = 1;
+	int frameCount = 0;
+
+	decoderParam.durationSecond = (double)fmtCtx->duration / AV_TIME_BASE;
+	auto videoTimeBase = fmtCtx->streams[decoderParam.videoStreamIndex]->time_base;
+	double videoTimeBaseSecond = (double)videoTimeBase.num / videoTimeBase.den;
 
 	MSG msg;
 	while (1) {
@@ -583,10 +602,12 @@ int WINAPI WinMain (
 			double freqRatio = displayFreq / frameFreq;
 			double countRatio = (double)displayCount / frameCount;
 			
-			while (freqRatio < countRatio) {
+			while (freqRatio < countRatio || countRatio == 0) {
 				auto frame = RequestFrame(decoderParam);
 				frameCount++;
 				countRatio = (double)displayCount / frameCount;
+
+				decoderParam.currentSecond = frameCount / frameFreq;
 
 				if (freqRatio >= countRatio) {
 					UpdateVideoTexture(frame, scenceParam, decoderParam);
