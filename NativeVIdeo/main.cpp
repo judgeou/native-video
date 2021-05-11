@@ -176,6 +176,9 @@ AVFrame* RequestFrame(DecoderParam& param) {
 				}
 			}
 		}
+		else if (ret < 0) {
+			return nullptr;
+		}
 
 		av_packet_unref(packet);
 	}
@@ -580,9 +583,9 @@ int WINAPI WinMain (
 	auto displayFreq = devMode.dmDisplayFrequency;
 
 	// 记录屏幕呈现了多少帧
-	int displayCount = 0;
+	int displayCount = 1;
 	// 记录视频播放了多少帧
-	int frameCount = 0;
+	int frameCount = 1;
 
 	decoderParam.durationSecond = (double)fmtCtx->duration / AV_TIME_BASE;
 	auto videoTimeBase = fmtCtx->streams[decoderParam.videoStreamIndex]->time_base;
@@ -603,7 +606,7 @@ int WINAPI WinMain (
 			double freqRatio = displayFreq / frameFreq;
 			double countRatio = (double)displayCount / frameCount;
 			
-			while (freqRatio < countRatio || countRatio == 0) {
+			while (freqRatio < countRatio) {
 				if (decoderParam.isJumpProgress) {
 					decoderParam.isJumpProgress = false;
 					auto& current = decoderParam.currentSecond;
@@ -615,6 +618,9 @@ int WINAPI WinMain (
 				}
 
 				auto frame = RequestFrame(decoderParam);
+				if (frame == nullptr) {
+					break;
+				}
 				frameCount++;
 				countRatio = (double)displayCount / frameCount;
 
