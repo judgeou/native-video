@@ -119,6 +119,7 @@ struct DecoderParam
 	bool isJumpProgress;
 	int playStatus;
 	system_clock::time_point mouseStopTime;
+	float audioVolume;
 };
 
 struct ScenceParam {
@@ -168,6 +169,9 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 			// 初始化 AudioPlayer，无论如何固定使用双声道
 			param.audioPlayer = make_shared<nv::AudioPlayer>(2, acodecCtx->sample_rate);
 			param.audioPlayer->Start();
+			constexpr float defaultVolume = 0.5;
+			param.audioPlayer->SetVolume(defaultVolume);
+			param.audioVolume = defaultVolume;
 		}
 	}
 
@@ -365,6 +369,16 @@ void DrawImgui(
 	// 这里开始写界面逻辑
 	// ImGui::ShowDemoWindow();
 	auto& io = ImGui::GetIO();
+
+	// 滚轮可以调整音量
+	auto& audioVolume = decoderParam.audioVolume;
+	if (io.MouseWheel != 0) {
+		audioVolume += io.MouseWheel * 0.05;
+		if (audioVolume < 0) audioVolume = 0;
+		if (audioVolume > 1) audioVolume = 1;
+		decoderParam.audioPlayer->SetVolume(audioVolume);
+	}
+
 	auto& mouseStopTime = decoderParam.mouseStopTime;
 	if (io.MouseDelta.y != 0 || io.MouseDelta.x != 0) {
 		mouseStopTime = system_clock::now();
@@ -395,6 +409,15 @@ void DrawImgui(
 			ImGui::PopItemWidth();
 			ImGui::SameLine();
 			ImGui::Text("%.3f", decoderParam.durationSecond);
+		}
+		ImGui::End();
+
+		if (ImGui::Begin("Volume")) {
+			ImGui::PushItemWidth(50);
+			if (ImGui::VSliderFloat("", { 18, 160 }, &decoderParam.audioVolume, 0, 1, "")) {
+				decoderParam.audioPlayer->SetVolume(audioVolume);
+			}
+			ImGui::PopItemWidth();
 		}
 		ImGui::End();
 	}
