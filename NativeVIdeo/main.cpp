@@ -3,6 +3,8 @@
 #include <string>
 #include <chrono>
 #include <thread>
+#include <map>
+#include <memory>
 
 #include <Windows.h>
 #include <windowsx.h>
@@ -44,6 +46,8 @@ using Microsoft::WRL::ComPtr;
 using std::vector;
 using std::string;
 using std::wstring;
+using std::make_shared;
+using std::shared_ptr;
 
 using namespace std::chrono;
 
@@ -54,6 +58,11 @@ struct Vertex {
 		float u;
 		float v;
 	} tex;
+};
+
+struct MediaFrame {
+	AVMediaType type;
+	AVFrame* frame;
 };
 
 string w2s(const wstring& wstr) {
@@ -97,9 +106,13 @@ struct DecoderParam
 {
 	AVFormatContext* fmtCtx;
 	AVCodecContext* vcodecCtx;
+	AVCodecContext* acodecCtx;
 	int width;
 	int height;
 	int videoStreamIndex;
+	int audioStreamIndex;
+	std::map<int, AVCodecContext*> codecMap;
+	shared_ptr<nv::AudioPlayer> audioPlayer;
 
 	float durationSecond;
 	float currentSecond;
@@ -135,13 +148,26 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 	avformat_find_stream_info(fmtCtx, NULL);
 
 	AVCodecContext* vcodecCtx = nullptr;
+	AVCodecContext* acodecCtx = nullptr;
 	for (int i = 0; i < fmtCtx->nb_streams; i++) {
 		const AVCodec* codec = avcodec_find_decoder(fmtCtx->streams[i]->codecpar->codec_id);
 		if (codec->type == AVMEDIA_TYPE_VIDEO) {
 			param.videoStreamIndex = i;
-			vcodecCtx = avcodec_alloc_context3(codec);
+			param.vcodecCtx = vcodecCtx = avcodec_alloc_context3(codec);
 			avcodec_parameters_to_context(vcodecCtx, fmtCtx->streams[i]->codecpar);
 			avcodec_open2(vcodecCtx, codec, NULL);
+			param.codecMap[i] = vcodecCtx;
+		}
+		if (codec->type == AVMEDIA_TYPE_AUDIO) {
+			param.audioStreamIndex = i;
+			param.acodecCtx = acodecCtx = avcodec_alloc_context3(codec);
+			avcodec_parameters_to_context(acodecCtx, fmtCtx->streams[i]->codecpar);
+			avcodec_open2(acodecCtx, codec, NULL);
+			param.codecMap[i] = acodecCtx;
+
+			// 初始化 AudioPlayer，无论如何固定使用双声道
+			param.audioPlayer = make_shared<nv::AudioPlayer>(2, acodecCtx->sample_rate);
+			param.audioPlayer->Start();
 		}
 	}
 
@@ -156,22 +182,21 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 	param.height = vcodecCtx->height;
 }
 
-AVFrame* RequestFrame(DecoderParam& param) {
+MediaFrame RequestFrame(DecoderParam& param) {
 	auto& fmtCtx = param.fmtCtx;
-	auto& vcodecCtx = param.vcodecCtx;
-	auto& videoStreamIndex = param.videoStreamIndex;
 
 	while (1) {
 		AVPacket* packet = av_packet_alloc();
 		int ret = av_read_frame(fmtCtx, packet);
-		if (ret == 0 && packet->stream_index == videoStreamIndex) {
-			ret = avcodec_send_packet(vcodecCtx, packet);
+		if (ret == 0) {
+			auto codecCtx = param.codecMap[packet->stream_index];
+			ret = avcodec_send_packet(codecCtx, packet);
 			if (ret == 0) {
 				AVFrame* frame = av_frame_alloc();
-				ret = avcodec_receive_frame(vcodecCtx, frame);
+				ret = avcodec_receive_frame(codecCtx, frame);
 				if (ret == 0) {
 					av_packet_unref(packet);
-					return frame;
+					return { codecCtx->codec_type, frame };
 				}
 				else if (ret == AVERROR(EAGAIN)) {
 					av_frame_unref(frame);
@@ -179,13 +204,13 @@ AVFrame* RequestFrame(DecoderParam& param) {
 			}
 		}
 		else if (ret < 0) {
-			return nullptr;
+			return { AVMEDIA_TYPE_UNKNOWN };
 		}
 
 		av_packet_unref(packet);
 	}
 
-	return nullptr;
+	return { AVMEDIA_TYPE_UNKNOWN };
 }
 
 void ReleaseDecoder(DecoderParam& param) {
@@ -642,19 +667,31 @@ int WINAPI WinMain (
 					displayCount = current * displayFreq;
 				}
 
-				auto frame = RequestFrame(decoderParam);
+				auto mediaFrame = RequestFrame(decoderParam);
+				auto& frame = mediaFrame.frame;
+
 				if (frame == nullptr) {
 					break;
 				}
-				frameCount++;
-				countRatio = (double)displayCount / frameCount;
 
-				decoderParam.currentSecond = frameCount / frameFreq;
+				if (mediaFrame.type == AVMEDIA_TYPE_VIDEO) {
+					frameCount++;
+					countRatio = (double)displayCount / frameCount;
 
-				if (freqRatio >= countRatio) {
-					UpdateVideoTexture(frame, scenceParam, decoderParam);
+					decoderParam.currentSecond = frameCount / frameFreq;
+
+					if (freqRatio >= countRatio) {
+						UpdateVideoTexture(frame, scenceParam, decoderParam);
+					}
 				}
-				av_frame_free(&frame);
+				else if (mediaFrame.type == AVMEDIA_TYPE_AUDIO) {
+					// 目前只考虑 FLTP 格式
+					if (frame->format == AV_SAMPLE_FMT_FLTP) {
+						decoderParam.audioPlayer->WriteFLTP((float*)frame->data[0], (float*)frame->data[1], frame->nb_samples);
+					}
+				}
+
+				av_frame_free(&mediaFrame.frame);
 			}
 
 			Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain.Get(), scenceParam, decoderParam);

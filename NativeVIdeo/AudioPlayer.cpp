@@ -79,7 +79,6 @@ namespace nv {
 
 	HRESULT AudioPlayer::Init() {
 		constexpr auto REFTIMES_PER_SEC = 10000000; // 1s的缓冲区
-		constexpr auto hnsDuration = REFTIMES_PER_SEC / 2; // 500ms 缓冲区
 
 		HRESULT hr;
 
@@ -116,12 +115,14 @@ namespace nv {
 		// 我们可以设置与音频设备不同的采样率
 		pwfx->nSamplesPerSec = nSamplesPerSec;
 		// 固定双声道
-		pwfx->nAvgBytesPerSec = pwfx->nSamplesPerSec * 2 * (pwfx->wBitsPerSample / 8);
+		pwfx->nAvgBytesPerSec = pwfx->nSamplesPerSec * nChannels * (pwfx->wBitsPerSample / 8);
+		// 必须使用这种格式
+		pwfx->wFormatTag = WAVE_FORMAT_EXTENSIBLE;
 
 		hr = pAudioClient->Initialize(
 			AUDCLNT_SHAREMODE_SHARED,
 			AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, // 这里的flag告诉系统需要重采样
-			hnsDuration,
+			REFTIMES_PER_SEC,
 			0,
 			pwfx,
 			NULL);
@@ -130,7 +131,7 @@ namespace nv {
 			__uuidof(IAudioRenderClient),
 			(void**)&pRenderClient);
 
-		maxSampleCount = (double)hnsDuration / REFTIMES_PER_SEC * pwfx->nSamplesPerSec;
+		maxSampleCount = pwfx->nSamplesPerSec;
 
 		return hr;
 	}
