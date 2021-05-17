@@ -712,6 +712,9 @@ int WINAPI WinMain (
 					if (frame->format == AV_SAMPLE_FMT_FLTP) {
 						decoderParam.audioPlayer->WriteFLTP((float*)frame->data[0], (float*)frame->data[1], frame->nb_samples);
 					}
+					else if (frame->format == AV_SAMPLE_FMT_S16) {
+						decoderParam.audioPlayer->WriteS16((short*)frame->data[0], frame->nb_samples);
+					}
 				}
 
 				av_frame_free(&mediaFrame.frame);

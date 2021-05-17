@@ -56,6 +56,28 @@ namespace nv {
 		return ReleaseBuffer(sampleCount);
 	}
 
+	HRESULT AudioPlayer::WriteS16(short* data, UINT32 sampleCount)
+	{
+		UINT32 padding;
+		pAudioClient->GetCurrentPadding(&padding);
+		if ((maxSampleCount - padding) < sampleCount) { // 音频写入太快了，超出缓冲区，我们直接清空现有缓冲区，保证时间对的上
+			pAudioClient->Stop();
+			pAudioClient->Reset();
+			pAudioClient->Start();
+		}
+
+		if (data) {
+			auto pData = GetBuffer(sampleCount);
+			for (size_t i = 0; i < sampleCount; i++) {
+				float s = (float)data[i];
+				pData[i] = (s - SHRT_MIN) / (SHRT_MAX - SHRT_MIN);
+			}
+			return ReleaseBuffer(sampleCount);
+		}
+
+		return -1;
+	}
+
 	HRESULT AudioPlayer::PlaySinWave(int nb_samples) {
 		auto m_time = 0.0;
 		auto m_deltaTime = 1.0 / nb_samples;
