@@ -152,14 +152,14 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 	AVCodecContext* acodecCtx = nullptr;
 	for (int i = 0; i < fmtCtx->nb_streams; i++) {
 		const AVCodec* codec = avcodec_find_decoder(fmtCtx->streams[i]->codecpar->codec_id);
-		if (codec->type == AVMEDIA_TYPE_VIDEO) {
+		if (codec && codec->type == AVMEDIA_TYPE_VIDEO) {
 			param.videoStreamIndex = i;
 			param.vcodecCtx = vcodecCtx = avcodec_alloc_context3(codec);
 			avcodec_parameters_to_context(vcodecCtx, fmtCtx->streams[i]->codecpar);
 			avcodec_open2(vcodecCtx, codec, NULL);
 			param.codecMap[i] = vcodecCtx;
 		}
-		if (codec->type == AVMEDIA_TYPE_AUDIO) {
+		if (codec && codec->type == AVMEDIA_TYPE_AUDIO) {
 			param.audioStreamIndex = i;
 			param.acodecCtx = acodecCtx = avcodec_alloc_context3(codec);
 			avcodec_parameters_to_context(acodecCtx, fmtCtx->streams[i]->codecpar);
@@ -194,16 +194,18 @@ MediaFrame RequestFrame(DecoderParam& param) {
 		int ret = av_read_frame(fmtCtx, packet);
 		if (ret == 0) {
 			auto codecCtx = param.codecMap[packet->stream_index];
-			ret = avcodec_send_packet(codecCtx, packet);
-			if (ret == 0) {
-				AVFrame* frame = av_frame_alloc();
-				ret = avcodec_receive_frame(codecCtx, frame);
+			if (codecCtx) {
+				ret = avcodec_send_packet(codecCtx, packet);
 				if (ret == 0) {
-					av_packet_unref(packet);
-					return { codecCtx->codec_type, frame };
-				}
-				else if (ret == AVERROR(EAGAIN)) {
-					av_frame_unref(frame);
+					AVFrame* frame = av_frame_alloc();
+					ret = avcodec_receive_frame(codecCtx, frame);
+					if (ret == 0) {
+						av_packet_unref(packet);
+						return { codecCtx->codec_type, frame };
+					}
+					else if (ret == AVERROR(EAGAIN)) {
+						av_frame_unref(frame);
+					}
 				}
 			}
 		}
@@ -272,9 +274,15 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 	device->CreateInputLayout(ied, std::size(ied), g_main_VS, sizeof(g_main_VS), &param.pInputLayout);
 	device->CreateVertexShader(g_main_VS, sizeof(g_main_VS), nullptr, &param.pVertexShader);
 
+	AVPixelFormat pixelForamt = decoderParam.vcodecCtx->pix_fmt;
+
 	// 纹理创建
+	static const std::map<AVPixelFormat, DXGI_FORMAT> textureForamtMap = {
+		{ AV_PIX_FMT_YUV420P, DXGI_FORMAT_NV12 },
+		{ AV_PIX_FMT_YUV420P10, DXGI_FORMAT_P010 }
+	};
 	D3D11_TEXTURE2D_DESC tdesc = {};
-	tdesc.Format = DXGI_FORMAT_NV12;
+	tdesc.Format = textureForamtMap.at(pixelForamt);
 	tdesc.Usage = D3D11_USAGE_DEFAULT;
 	tdesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED;
 	tdesc.ArraySize = 1;
@@ -291,10 +299,19 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 	dxgiShareTexture->GetSharedHandle(&param.sharedHandle);
 
 	// 创建着色器资源
+	static const std::map<AVPixelFormat, DXGI_FORMAT> srvYForamt = {
+		{ AV_PIX_FMT_YUV420P, DXGI_FORMAT_R8_UNORM },
+		{ AV_PIX_FMT_YUV420P10, DXGI_FORMAT_R16_UNORM }
+	};
+	static const std::map<AVPixelFormat, DXGI_FORMAT> srvUVFormat = {
+		{ AV_PIX_FMT_YUV420P, DXGI_FORMAT_R8G8_UNORM },
+		{ AV_PIX_FMT_YUV420P10, DXGI_FORMAT_R16G16_UNORM }
+	};
+
 	D3D11_SHADER_RESOURCE_VIEW_DESC const YPlaneDesc = CD3D11_SHADER_RESOURCE_VIEW_DESC(
 		param.texture.Get(),
 		D3D11_SRV_DIMENSION_TEXTURE2D,
-		DXGI_FORMAT_R8_UNORM
+		srvYForamt.at(pixelForamt)
 	);
 
 	device->CreateShaderResourceView(
@@ -306,7 +323,7 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 	D3D11_SHADER_RESOURCE_VIEW_DESC const UVPlaneDesc = CD3D11_SHADER_RESOURCE_VIEW_DESC(
 		param.texture.Get(),
 		D3D11_SRV_DIMENSION_TEXTURE2D,
-		DXGI_FORMAT_R8G8_UNORM
+		srvUVFormat.at(pixelForamt)
 	);
 
 	device->CreateShaderResourceView(
@@ -496,6 +513,9 @@ void Draw(
 void UpdateVideoTexture(AVFrame* frame, const ScenceParam& scenceParam, const DecoderParam& decoderParam) {
 	ID3D11Texture2D* t_frame = (ID3D11Texture2D*)frame->data[0];
 	int t_index = (int)frame->data[1];
+
+	D3D11_TEXTURE2D_DESC desc;
+	t_frame->GetDesc(&desc);
 
 	ComPtr<ID3D11Device> device;
 	t_frame->GetDevice(device.GetAddressOf());
