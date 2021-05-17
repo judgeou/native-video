@@ -68,9 +68,15 @@ namespace nv {
 
 		if (data) {
 			auto pData = GetBuffer(sampleCount);
-			for (size_t i = 0; i < sampleCount; i++) {
+			for (size_t i = 0; i < sampleCount * this->nChannels; i++) {
 				float s = (float)data[i];
-				pData[i] = (s - SHRT_MIN) / (SHRT_MAX - SHRT_MIN);
+				if (s > 0) {
+					s = s / SHRT_MAX;
+				}
+				else if (s < 0) {
+					s = -s / SHRT_MIN;
+				}
+				((float*)pData)[i] = s;
 			}
 			return ReleaseBuffer(sampleCount);
 		}

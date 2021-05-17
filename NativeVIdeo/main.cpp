@@ -409,11 +409,13 @@ void DrawImgui(
 			auto& playStatus = decoderParam.playStatus;
 			if (playStatus == 0) {
 				if (ImGui::Button("Pause")) {
+					decoderParam.audioPlayer->Stop();
 					playStatus = 1;
 				}
 			}
 			else if (playStatus == 1 || playStatus == 2) {
 				if (ImGui::Button("Play")) {
+					decoderParam.audioPlayer->Start();
 					playStatus = 0;
 				}
 			}
