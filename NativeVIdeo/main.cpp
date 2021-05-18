@@ -29,6 +29,7 @@ extern "C" {
 #pragma comment(lib, "d3d9.lib")
 #include <d3d11.h>
 #pragma comment(lib, "d3d11.lib")
+#include <dxgi1_4.h>
 #include <DirectXMath.h>
 namespace dx = DirectX;
 
@@ -446,7 +447,7 @@ void DrawImgui(
 }
 
 void Draw(
-	ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain* swapchain,
+	ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain3* swapchain,
 	ScenceParam& param, DecoderParam& decoderParam
 ) {
 	UINT stride = sizeof(Vertex);
@@ -496,7 +497,10 @@ void Draw(
 	ComPtr<ID3D11Texture2D> backBuffer;
 	swapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&backBuffer);
 
-	CD3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc(D3D11_RTV_DIMENSION_TEXTURE2D, DXGI_FORMAT_R8G8B8A8_UNORM);
+	D3D11_TEXTURE2D_DESC backDesc;
+	backBuffer->GetDesc(&backDesc);
+
+	CD3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc(D3D11_RTV_DIMENSION_TEXTURE2D, backDesc.Format);
 	ComPtr<ID3D11RenderTargetView>  rtv;
 	device->CreateRenderTargetView(backBuffer.Get(), &renderTargetViewDesc, &rtv);
 	ID3D11RenderTargetView* rtvs[] = { rtv.Get() };
@@ -634,22 +638,17 @@ int WINAPI WinMain (
 	SetWindowLongPtr(window, GWLP_USERDATA, (LONG_PTR)&scenceParam);
 
 	// D3D11
-	DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
-	auto& bufferDesc = swapChainDesc.BufferDesc;
-	bufferDesc.Width = clientWidth;
-	bufferDesc.Height = clientHeight;
-	bufferDesc.Format = DXGI_FORMAT::DXGI_FORMAT_R8G8B8A8_UNORM;
-	bufferDesc.RefreshRate.Numerator = 0;
-	bufferDesc.RefreshRate.Denominator = 0;
-	bufferDesc.Scaling = DXGI_MODE_SCALING_STRETCHED;
-	bufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
-	swapChainDesc.SampleDesc.Count = 1;
-	swapChainDesc.SampleDesc.Quality = 0;
+	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
+	swapChainDesc.Width = clientWidth;
+	swapChainDesc.Height = clientHeight;
+	swapChainDesc.Format = DXGI_FORMAT::DXGI_FORMAT_R10G10B10A2_UNORM;
+	swapChainDesc.Stereo = FALSE;
+	swapChainDesc.SampleDesc = { 1, 0 };
 	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 	swapChainDesc.BufferCount = 2;
-	swapChainDesc.OutputWindow = window;
-	swapChainDesc.Windowed = TRUE;
+	swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
 	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+	swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
 	swapChainDesc.Flags = 0;
 
 	UINT flags = 0;
@@ -658,10 +657,23 @@ int WINAPI WinMain (
 	flags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif // DEBUG
 
-	ComPtr<IDXGISwapChain> swapChain;
 	ComPtr<ID3D11Device> d3ddeivce;
 	ComPtr<ID3D11DeviceContext> d3ddeviceCtx;
-	D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, flags, NULL, NULL, D3D11_SDK_VERSION, &swapChainDesc, &swapChain, &d3ddeivce, NULL, &d3ddeviceCtx);
+	D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, flags, NULL, NULL, D3D11_SDK_VERSION, &d3ddeivce, NULL, &d3ddeviceCtx);
+
+	ComPtr<IDXGIDevice2> pDXGIDevice;
+	d3ddeivce->QueryInterface(__uuidof(IDXGIDevice2), (void**)&pDXGIDevice);
+	ComPtr<IDXGIAdapter3> pDXGIAdapter;
+	pDXGIDevice->GetParent(__uuidof(IDXGIAdapter3), (void**)&pDXGIAdapter);
+	ComPtr<IDXGIFactory4> pIDXGIFactory;
+	pDXGIAdapter->GetParent(__uuidof(IDXGIFactory4), (void**)&pIDXGIFactory);
+
+	ComPtr<IDXGISwapChain1> swapChain1;
+	pIDXGIFactory->CreateSwapChainForHwnd(d3ddeivce.Get(), window, &swapChainDesc, NULL, NULL, &swapChain1);
+	ComPtr<IDXGISwapChain3> swapChain3;
+	swapChain1->QueryInterface<IDXGISwapChain3>(&swapChain3);
+
+	// swapChain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020);
 	
 	scenceParam.viewWidth = clientWidth;
 	scenceParam.viewHeight = clientHeight;
@@ -742,9 +754,9 @@ int WINAPI WinMain (
 				av_frame_free(&mediaFrame.frame);
 			}
 
-			Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain.Get(), scenceParam, decoderParam);
+			Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain3.Get(), scenceParam, decoderParam);
 			
-			swapChain->Present(1, 0);
+			swapChain3->Present(1, 0);
 			if (decoderParam.playStatus == 0) {
 				displayCount++;
 			}
