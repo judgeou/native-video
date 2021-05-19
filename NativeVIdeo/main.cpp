@@ -715,11 +715,8 @@ int WINAPI WinMain (
 
 	InitScence(d3ddeivce.Get(), d3ddeviceCtx.Get(), scenceParam, decoderParam);
 
-	DEVMODE devMode = {};
-	devMode.dmSize = sizeof(devMode);
-	EnumDisplaySettings(NULL, ENUM_CURRENT_SETTINGS, &devMode);
 	// 屏幕刷新率
-	auto displayFreq = devMode.dmDisplayFrequency;
+	auto displayFreq = (double)modeDesc.RefreshRate.Numerator / modeDesc.RefreshRate.Denominator;
 
 	// 记录屏幕呈现了多少帧
 	int displayCount = 1;
