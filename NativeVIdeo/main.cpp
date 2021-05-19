@@ -142,6 +142,8 @@ struct ScenceParam {
 
 	int viewWidth;
 	int viewHeight;
+	bool triggerFullScreen;
+	DXGI_MODE_DESC1 fullScreenModeDesc;
 };
 
 void InitDecoder(const char* filePath, DecoderParam& param) {
@@ -388,6 +390,12 @@ void DrawImgui(
 	// ImGui::ShowDemoWindow();
 	auto& io = ImGui::GetIO();
 
+	// 全屏窗口控制
+	auto isEnterDown = io.KeysDownDuration[VK_RETURN] == 0.0f;
+	if (isEnterDown) {
+		param.triggerFullScreen = true;
+	}
+
 	// 滚轮可以调整音量
 	auto& audioVolume = decoderParam.audioVolume;
 	if (io.MouseWheel != 0) {
@@ -446,6 +454,32 @@ void DrawImgui(
 	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 }
 
+// 切换全屏状态
+void SwitchFullScreen(IDXGISwapChain3* swapchain, ScenceParam& param) {
+	DXGI_SWAP_CHAIN_DESC swapDesc;
+	swapchain->GetDesc(&swapDesc);
+	auto& bufferDesc = swapDesc.BufferDesc;
+
+	BOOL state;
+	swapchain->GetFullscreenState(&state, NULL);
+	if (state) {
+		swapchain->SetFullscreenState(FALSE, NULL);
+		swapchain->ResizeBuffers(
+			0,
+			param.viewWidth, param.viewHeight,
+			DXGI_FORMAT_UNKNOWN,
+			0);
+	}
+	else {
+		swapchain->SetFullscreenState(TRUE, NULL);
+		swapchain->ResizeBuffers(
+			0,
+			param.fullScreenModeDesc.Width, param.fullScreenModeDesc.Height,
+			DXGI_FORMAT_UNKNOWN,
+			0);
+	}
+}
+
 void Draw(
 	ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain3* swapchain,
 	ScenceParam& param, DecoderParam& decoderParam
@@ -485,12 +519,19 @@ void Draw(
 	ID3D11SamplerState* samplers[] = { param.pSampler.Get() };
 	ctx->PSSetSamplers(0, 1, samplers);
 
-	// 必要时重新创建交换链
-	DXGI_SWAP_CHAIN_DESC swapDesc;
-	swapchain->GetDesc(&swapDesc);
-	auto& bufferDesc = swapDesc.BufferDesc;
-	if (bufferDesc.Width != param.viewWidth || bufferDesc.Height != param.viewHeight) {
-		swapchain->ResizeBuffers(swapDesc.BufferCount, param.viewWidth, param.viewHeight, bufferDesc.Format, swapDesc.Flags);
+	if (param.triggerFullScreen) {
+		param.triggerFullScreen = false;
+
+		SwitchFullScreen(swapchain, param);
+	}
+	else {
+		// 必要时重新创建交换链
+		DXGI_SWAP_CHAIN_DESC swapDesc;
+		swapchain->GetDesc(&swapDesc);
+		auto& bufferDesc = swapDesc.BufferDesc;
+		if (bufferDesc.Width != param.viewWidth || bufferDesc.Height != param.viewHeight) {
+			swapchain->ResizeBuffers(swapDesc.BufferCount, param.viewWidth, param.viewHeight, bufferDesc.Format, swapDesc.Flags);
+		}
 	}
 
 	// 输出合并
@@ -565,43 +606,18 @@ int WINAPI WinMain (
 	wndClass.lpszClassName = className;
 	wndClass.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT {
 		ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam);
+		auto scenceParam = (ScenceParam*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
 
 		switch (msg)
 		{
 		case WM_SIZE:
 		{
-			auto scenceParam = (ScenceParam*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
 			if (scenceParam) {
 				auto width = GET_X_LPARAM(lParam);
 				auto height = GET_Y_LPARAM(lParam);
 
-				// 专门处理从全屏恢复到窗口的特殊情况
-				if ((GetWindowLongPtr(hwnd, GWL_STYLE) == (WS_VISIBLE | WS_POPUP | WS_CLIPSIBLINGS))) {
-					RECT clientRect = { 0, 0, 0, 0 };
-					AdjustWindowRect(&clientRect, WS_OVERLAPPEDWINDOW, FALSE);
-					width = width - (clientRect.right - clientRect.left);
-					height = height - (clientRect.bottom - clientRect.top);
-				}
-
 				scenceParam->viewWidth = width;
 				scenceParam->viewHeight = height;
-			}
-			return 0;
-		}
-		case WM_KEYUP:
-		{
-			if (wParam == VK_RETURN) {
-				static bool isMax = false;
-				if (isMax) {
-					isMax = false;
-					SendMessage(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
-					SetWindowLongPtr(hwnd, GWL_STYLE, WS_VISIBLE | WS_OVERLAPPEDWINDOW);
-				}
-				else {
-					isMax = true;
-					SetWindowLongPtr(hwnd, GWL_STYLE, WS_VISIBLE | WS_POPUP);
-					SendMessage(hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
-				}
 			}
 			return 0;
 		}
@@ -616,7 +632,7 @@ int WINAPI WinMain (
 	RegisterClass(&wndClass);
 
 	DecoderParam decoderParam = {};
-	ScenceParam scenceParam;
+	ScenceParam scenceParam = {};
 
 	InitDecoder(filePath.c_str(), decoderParam);
 
@@ -674,6 +690,22 @@ int WINAPI WinMain (
 	swapChain1->QueryInterface<IDXGISwapChain3>(&swapChain3);
 
 	// swapChain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020);
+
+	ComPtr<IDXGIOutput> pIDXGIOutput;
+	swapChain3->GetContainingOutput(&pIDXGIOutput);
+	ComPtr<IDXGIOutput1> pIDXGIOutput1;
+	pIDXGIOutput->QueryInterface<IDXGIOutput1>(&pIDXGIOutput1);
+
+	DXGI_OUTPUT_DESC outputDesc;
+	pIDXGIOutput1->GetDesc(&outputDesc);
+	DXGI_MODE_DESC1 modeDesc = {};
+	modeDesc.Format = swapChainDesc.Format;
+	modeDesc.Width = outputDesc.DesktopCoordinates.right - outputDesc.DesktopCoordinates.left;
+	modeDesc.Height = outputDesc.DesktopCoordinates.bottom - outputDesc.DesktopCoordinates.top;
+	modeDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_PROGRESSIVE;
+	
+	pIDXGIOutput1->FindClosestMatchingMode1(&modeDesc, &modeDesc, 0);
+	scenceParam.fullScreenModeDesc = modeDesc;
 	
 	scenceParam.viewWidth = clientWidth;
 	scenceParam.viewHeight = clientHeight;
