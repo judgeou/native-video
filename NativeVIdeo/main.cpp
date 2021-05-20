@@ -771,7 +771,6 @@ int WINAPI WinMain (
 					}
 				}
 				else if (mediaFrame.type == AVMEDIA_TYPE_AUDIO) {
-					// 目前只考虑 FLTP 格式
 					if (frame->format == AV_SAMPLE_FMT_FLTP) {
 						decoderParam.audioPlayer->WriteFLTP((float*)frame->data[0], (float*)frame->data[1], frame->nb_samples);
 					}
@@ -785,7 +784,9 @@ int WINAPI WinMain (
 
 			Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain3.Get(), scenceParam, decoderParam);
 			
-			swapChain3->Present(1, 0);
+			pIDXGIOutput1->WaitForVBlank();
+			swapChain3->Present(1, DXGI_PRESENT_DO_NOT_WAIT);
+			
 			if (decoderParam.playStatus == 0) {
 				displayCount++;
 			}
