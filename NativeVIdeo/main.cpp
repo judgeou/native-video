@@ -282,7 +282,8 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 	// 纹理创建
 	static const std::map<AVPixelFormat, DXGI_FORMAT> textureForamtMap = {
 		{ AV_PIX_FMT_YUV420P, DXGI_FORMAT_NV12 },
-		{ AV_PIX_FMT_YUV420P10, DXGI_FORMAT_P010 }
+		{ AV_PIX_FMT_YUV420P10, DXGI_FORMAT_P010 },
+		{ AV_PIX_FMT_YUV444P10LE, DXGI_FORMAT_P010 }
 	};
 	D3D11_TEXTURE2D_DESC tdesc = {};
 	tdesc.Format = textureForamtMap.at(pixelForamt);
@@ -304,11 +305,13 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 	// 创建着色器资源
 	static const std::map<AVPixelFormat, DXGI_FORMAT> srvYForamt = {
 		{ AV_PIX_FMT_YUV420P, DXGI_FORMAT_R8_UNORM },
-		{ AV_PIX_FMT_YUV420P10, DXGI_FORMAT_R16_UNORM }
+		{ AV_PIX_FMT_YUV420P10, DXGI_FORMAT_R16_UNORM },
+		{ AV_PIX_FMT_YUV444P10LE, DXGI_FORMAT_R16_UNORM }
 	};
 	static const std::map<AVPixelFormat, DXGI_FORMAT> srvUVFormat = {
 		{ AV_PIX_FMT_YUV420P, DXGI_FORMAT_R8G8_UNORM },
-		{ AV_PIX_FMT_YUV420P10, DXGI_FORMAT_R16G16_UNORM }
+		{ AV_PIX_FMT_YUV420P10, DXGI_FORMAT_R16G16_UNORM },
+		{ AV_PIX_FMT_YUV444P10LE, DXGI_FORMAT_R16_UNORM }
 	};
 
 	D3D11_SHADER_RESOURCE_VIEW_DESC const YPlaneDesc = CD3D11_SHADER_RESOURCE_VIEW_DESC(
@@ -598,8 +601,6 @@ int WINAPI WinMain (
 	CoInitializeEx(NULL, COINIT::COINIT_MULTITHREADED);
 	SetProcessDPIAware();
 
-	auto filePath = w2s(AskVideoFilePath());
-
 	auto className = L"MyWindow";
 	WNDCLASSW wndClass = {};
 	wndClass.hInstance = hInstance;
@@ -631,6 +632,13 @@ int WINAPI WinMain (
 
 	RegisterClass(&wndClass);
 
+	int windowWidth = 1280;
+	int windowHeight = 720;
+	auto window = CreateWindow(className, L"Hello World 标题", WS_OVERLAPPEDWINDOW, 100, 100, windowWidth, windowHeight, NULL, NULL, hInstance, NULL);
+	ShowWindow(window, SW_SHOW);
+
+	auto filePath = w2s(AskVideoFilePath());
+
 	DecoderParam decoderParam = {};
 	ScenceParam scenceParam = {};
 
@@ -640,17 +648,12 @@ int WINAPI WinMain (
 	auto& height = decoderParam.height;
 	auto& fmtCtx = decoderParam.fmtCtx;
 	auto& vcodecCtx = decoderParam.vcodecCtx;
-
-	int windowWidth = 1280;
-	int windowHeight = 720;
-	auto window = CreateWindow(className, L"Hello World 标题", WS_OVERLAPPEDWINDOW, 100, 100, windowWidth, windowHeight, NULL, NULL, hInstance, NULL);
 	
 	RECT clientRect;
 	GetClientRect(window, &clientRect);
 	int clientWidth = clientRect.right - clientRect.left;
 	int clientHeight = clientRect.bottom - clientRect.top;
 
-	ShowWindow(window, SW_SHOW);
 	SetWindowLongPtr(window, GWLP_USERDATA, (LONG_PTR)&scenceParam);
 
 	// D3D11
@@ -785,7 +788,7 @@ int WINAPI WinMain (
 			Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain3.Get(), scenceParam, decoderParam);
 			
 			pIDXGIOutput1->WaitForVBlank();
-			swapChain3->Present(1, DXGI_PRESENT_DO_NOT_WAIT);
+			swapChain3->Present(0, 0);
 			
 			if (decoderParam.playStatus == 0) {
 				displayCount++;
