@@ -1,4 +1,4 @@
-#include <stdio.h>
+ï»¿#include <stdio.h>
 #include <vector>
 #include <string>
 #include <chrono>
@@ -81,7 +81,7 @@ std::wstring AskVideoFilePath() {
 	CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_ALL,
 		IID_IFileOpenDialog, reinterpret_cast<void**>(fileDialog.GetAddressOf()));
 
-	fileDialog->SetTitle(L"Ñ¡ÔñÊÓÆµÎÄ¼ş");
+	fileDialog->SetTitle(L"é€‰æ‹©è§†é¢‘æ–‡ä»¶");
 
 	COMDLG_FILTERSPEC rgSpec[] =
 	{
@@ -144,6 +144,8 @@ struct ScenceParam {
 	int viewHeight;
 	bool triggerFullScreen;
 	DXGI_MODE_DESC1 fullScreenModeDesc;
+
+	ImFont* myfont;
 };
 
 void InitDecoder(const char* filePath, DecoderParam& param) {
@@ -169,7 +171,7 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 			avcodec_open2(acodecCtx, codec, NULL);
 			param.codecMap[i] = acodecCtx;
 
-			// ³õÊ¼»¯ AudioPlayer£¬ÎŞÂÛÈçºÎ¹Ì¶¨Ê¹ÓÃË«ÉùµÀ
+			// åˆå§‹åŒ– AudioPlayerï¼Œæ— è®ºå¦‚ä½•å›ºå®šä½¿ç”¨åŒå£°é“
 			param.audioPlayer = make_shared<nv::AudioPlayer>(2, acodecCtx->sample_rate);
 			param.audioPlayer->Start();
 			constexpr float defaultVolume = 0.5;
@@ -178,7 +180,7 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 		}
 	}
 
-	// ÆôÓÃÓ²¼ş½âÂëÆ÷
+	// å¯ç”¨ç¡¬ä»¶è§£ç å™¨
 	AVBufferRef* hw_device_ctx = nullptr;
 	av_hwdevice_ctx_create(&hw_device_ctx, AVHWDeviceType::AV_HWDEVICE_TYPE_D3D11VA, NULL, NULL, NULL);
 	vcodecCtx->hw_device_ctx = hw_device_ctx;
@@ -228,7 +230,7 @@ void ReleaseDecoder(DecoderParam& param) {
 }
 
 void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& param, const DecoderParam& decoderParam) {
-	// ¶¥µãÊäÈë
+	// é¡¶ç‚¹è¾“å…¥
 	const Vertex vertices[] = {
 		{-1,	1,	0,	0,	0},
 		{1,		1,	0,	1,	0},
@@ -254,7 +256,7 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 
 	device->CreateBuffer(&ibd, &isd, &param.pIndexBuffer);
 
-	// ³£Á¿»º³åÇø
+	// å¸¸é‡ç¼“å†²åŒº
 	auto constant = dx::XMMatrixScaling(1, 1, 1);
 	constant = dx::XMMatrixTranspose(constant);
 	D3D11_BUFFER_DESC cbd = {};
@@ -268,7 +270,7 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 	
 	device->CreateBuffer(&cbd, &csd, &param.pConstantBuffer);
 
-	// ¶¥µã×ÅÉ«Æ÷
+	// é¡¶ç‚¹ç€è‰²å™¨
 	D3D11_INPUT_ELEMENT_DESC ied[] = {
 		{"POSITION", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
 		{"TEXCOORD", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0}
@@ -279,7 +281,7 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 
 	AVPixelFormat pixelForamt = decoderParam.vcodecCtx->pix_fmt;
 
-	// ÎÆÀí´´½¨
+	// çº¹ç†åˆ›å»º
 	static const std::map<AVPixelFormat, DXGI_FORMAT> textureForamtMap = {
 		{ AV_PIX_FMT_YUV420P, DXGI_FORMAT_NV12 },
 		{ AV_PIX_FMT_YUV420P10, DXGI_FORMAT_P010 }
@@ -296,12 +298,12 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 	tdesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 	device->CreateTexture2D(&tdesc, nullptr, &param.texture);
 
-	// ´´½¨ÎÆÀí¹²Ïí¾ä±ú
+	// åˆ›å»ºçº¹ç†å…±äº«å¥æŸ„
 	ComPtr<IDXGIResource> dxgiShareTexture;
 	param.texture->QueryInterface(__uuidof(IDXGIResource), (void**)dxgiShareTexture.GetAddressOf());
 	dxgiShareTexture->GetSharedHandle(&param.sharedHandle);
 
-	// ´´½¨×ÅÉ«Æ÷×ÊÔ´
+	// åˆ›å»ºç€è‰²å™¨èµ„æº
 	static const std::map<AVPixelFormat, DXGI_FORMAT> srvYForamt = {
 		{ AV_PIX_FMT_YUV420P, DXGI_FORMAT_R8_UNORM },
 		{ AV_PIX_FMT_YUV420P10, DXGI_FORMAT_R16_UNORM }
@@ -335,7 +337,7 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 		&param.srvUV
 	);
 
-	// ´´½¨²ÉÑùÆ÷
+	// åˆ›å»ºé‡‡æ ·å™¨
 	D3D11_SAMPLER_DESC samplerDesc = {};
 	samplerDesc.Filter = D3D11_FILTER::D3D11_FILTER_ANISOTROPIC;
 	samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
@@ -345,14 +347,19 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 
 	device->CreateSamplerState(&samplerDesc, &param.pSampler);
 
-	// ÏñËØ×ÅÉ«Æ÷
+	// åƒç´ ç€è‰²å™¨
 	device->CreatePixelShader(g_main_PS, sizeof(g_main_PS), nullptr, &param.pPixelShader);
 
 	// imgui
 	ImGui_ImplDX11_Init(device, ctx);
+
+	auto& imgui_io = ImGui::GetIO();
+	auto font2 = imgui_io.Fonts->AddFontFromFileTTF("D:\\simhei.ttf", 16, NULL, imgui_io.Fonts->GetGlyphRangesChineseFull());
+	imgui_io.Fonts->Build();
+	param.myfont = font2;
 }
 
-// Í¨¹ı´°¿Ú±ÈÀıÓëÊÓÆµ±ÈÀıµÄ¼ÆËã£¬µÃ³öºÏÊÊµÄËõ·Å¾ØÕó£¬Ğ´Èë³£Á¿»º³å¡£
+// é€šè¿‡çª—å£æ¯”ä¾‹ä¸è§†é¢‘æ¯”ä¾‹çš„è®¡ç®—ï¼Œå¾—å‡ºåˆé€‚çš„ç¼©æ”¾çŸ©é˜µï¼Œå†™å…¥å¸¸é‡ç¼“å†²ã€‚
 void FitQuadSize(
 	ID3D11DeviceContext* ctx, ID3D11Buffer* constant,
 	int videoWidth, int videoHeight, int viewWidth, int viewHeight
@@ -386,17 +393,18 @@ void DrawImgui(
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
 
-	// ÕâÀï¿ªÊ¼Ğ´½çÃæÂß¼­
+	// è¿™é‡Œå¼€å§‹å†™ç•Œé¢é€»è¾‘
 	// ImGui::ShowDemoWindow();
 	auto& io = ImGui::GetIO();
+	ImGui::PushFont(param.myfont);
 
-	// È«ÆÁ´°¿Ú¿ØÖÆ
+	// å…¨å±çª—å£æ§åˆ¶
 	auto isEnterDown = io.KeysDownDuration[VK_RETURN] == 0.0f;
 	if (isEnterDown) {
 		param.triggerFullScreen = true;
 	}
 
-	// ¹öÂÖ¿ÉÒÔµ÷ÕûÒôÁ¿
+	// æ»šè½®å¯ä»¥è°ƒæ•´éŸ³é‡
 	auto& audioVolume = decoderParam.audioVolume;
 	if (io.MouseWheel != 0) {
 		audioVolume += io.MouseWheel * 0.05;
@@ -414,7 +422,7 @@ void DrawImgui(
 	bool isShowWidgets = ((system_clock::now() - mouseStopTime) < hideMouseDelay) || io.WantCaptureMouse;
 
 	if (isShowWidgets) {
-		if (ImGui::Begin("Play")) {
+		if (ImGui::Begin(u8"Playæ’­æ”¾")) {
 			auto& playStatus = decoderParam.playStatus;
 			if (playStatus == 0) {
 				if (ImGui::Button("Pause")) {
@@ -450,11 +458,13 @@ void DrawImgui(
 		ImGui::End();
 	}
 
+	ImGui::PopFont();
+
 	ImGui::Render();
 	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 }
 
-// ÇĞ»»È«ÆÁ×´Ì¬
+// åˆ‡æ¢å…¨å±çŠ¶æ€
 void SwitchFullScreen(IDXGISwapChain3* swapchain, ScenceParam& param) {
 	DXGI_SWAP_CHAIN_DESC swapDesc;
 	swapchain->GetDesc(&swapDesc);
@@ -501,7 +511,7 @@ void Draw(
 
 	ctx->VSSetShader(param.pVertexShader.Get(), 0, 0);
 
-	// ¹âÕ¤»¯
+	// å…‰æ …åŒ–
 	D3D11_VIEWPORT viewPort = {};
 	viewPort.TopLeftX = 0;
 	viewPort.TopLeftY = 0;
@@ -525,7 +535,7 @@ void Draw(
 		SwitchFullScreen(swapchain, param);
 	}
 	else {
-		// ±ØÒªÊ±ÖØĞÂ´´½¨½»»»Á´
+		// å¿…è¦æ—¶é‡æ–°åˆ›å»ºäº¤æ¢é“¾
 		DXGI_SWAP_CHAIN_DESC swapDesc;
 		swapchain->GetDesc(&swapDesc);
 		auto& bufferDesc = swapDesc.BufferDesc;
@@ -534,7 +544,7 @@ void Draw(
 		}
 	}
 
-	// Êä³öºÏ²¢
+	// è¾“å‡ºåˆå¹¶
 	ComPtr<ID3D11Texture2D> backBuffer;
 	swapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&backBuffer);
 
@@ -643,7 +653,7 @@ int WINAPI WinMain (
 
 	int windowWidth = 1280;
 	int windowHeight = 720;
-	auto window = CreateWindow(className, L"Hello World ±êÌâ", WS_OVERLAPPEDWINDOW, 100, 100, windowWidth, windowHeight, NULL, NULL, hInstance, NULL);
+	auto window = CreateWindow(className, L"Hello World æ ‡é¢˜", WS_OVERLAPPEDWINDOW, 100, 100, windowWidth, windowHeight, NULL, NULL, hInstance, NULL);
 	
 	RECT clientRect;
 	GetClientRect(window, &clientRect);
@@ -715,12 +725,12 @@ int WINAPI WinMain (
 
 	InitScence(d3ddeivce.Get(), d3ddeviceCtx.Get(), scenceParam, decoderParam);
 
-	// ÆÁÄ»Ë¢ĞÂÂÊ
+	// å±å¹•åˆ·æ–°ç‡
 	auto displayFreq = (double)modeDesc.RefreshRate.Numerator / modeDesc.RefreshRate.Denominator;
 
-	// ¼ÇÂ¼ÆÁÄ»³ÊÏÖÁË¶àÉÙÖ¡
+	// è®°å½•å±å¹•å‘ˆç°äº†å¤šå°‘å¸§
 	int displayCount = 1;
-	// ¼ÇÂ¼ÊÓÆµ²¥·ÅÁË¶àÉÙÖ¡
+	// è®°å½•è§†é¢‘æ’­æ”¾äº†å¤šå°‘å¸§
 	int frameCount = 1;
 
 	decoderParam.durationSecond = (double)fmtCtx->duration / AV_TIME_BASE;
@@ -742,7 +752,7 @@ int WINAPI WinMain (
 			double freqRatio = displayFreq / frameFreq;
 			double countRatio = (double)displayCount / frameCount;
 			
-			while (freqRatio < countRatio && decoderParam.playStatus == 0) {
+			while (frameCount == 1 || (freqRatio < countRatio && decoderParam.playStatus == 0)) {
 				if (decoderParam.isJumpProgress) {
 					decoderParam.isJumpProgress = false;
 					auto& current = decoderParam.currentSecond;
@@ -771,7 +781,7 @@ int WINAPI WinMain (
 					}
 				}
 				else if (mediaFrame.type == AVMEDIA_TYPE_AUDIO) {
-					// Ä¿Ç°Ö»¿¼ÂÇ FLTP ¸ñÊ½
+					// ç›®å‰åªè€ƒè™‘ FLTP æ ¼å¼
 					if (frame->format == AV_SAMPLE_FMT_FLTP) {
 						decoderParam.audioPlayer->WriteFLTP((float*)frame->data[0], (float*)frame->data[1], frame->nb_samples);
 					}
