@@ -48,6 +48,9 @@
     <ClCompile Include="AudioPlayer.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="CustomTextRenderer.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="VertexShader.hlsl">
@@ -98,6 +101,9 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="PixelShader_Subtitle.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="CustomTextRenderer.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

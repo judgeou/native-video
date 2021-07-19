@@ -50,6 +50,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 #include "PixelShader_Subtitle.h"
 
 #include "AudioPlayer.h"
+#include "CustomTextRenderer.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -193,7 +194,7 @@ struct ScenceParam {
 	ComPtr<IDWriteFactory> m_pDWriteFactory;
 	ComPtr<IDWriteTextFormat> textFormat;
 	ComPtr<ID2D1RenderTarget> d2drt;
-	// ComPtr<DWriteColorTextRenderer::CustomTextRenderer> textRenderer;
+	ComPtr<DWriteColorTextRenderer::CustomTextRenderer> textRenderer;
 };
 
 void CreateD2DRenderTarget(ID2D1Factory* d2dfa, ID3D11Texture2D* texture, ID2D1RenderTarget** d2drt) {
@@ -539,6 +540,7 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 	CreateTextFormat(param.m_pDWriteFactory.Get(), param.viewHeight, &param.textFormat);
 	CreateSubTexture(device, param.viewWidth, param.viewHeight, &param.subTexture, &param.subSrv);
 	CreateD2DRenderTarget(param.d2dfa.Get(), param.subTexture.Get(), &param.d2drt);
+	param.textRenderer = new DWriteColorTextRenderer::CustomTextRenderer(param.d2dfa, param.d2drt);
 }
 
 // 通过窗口比例与视频比例的计算，得出合适的缩放矩阵，写入常量缓冲。
@@ -794,7 +796,11 @@ void UpdateSubtitlesTexture(ScenceParam& param) {
 		else {
 			auto pos = D2D1::RectF(0, 0, param.viewWidth, param.viewHeight);
 			wstring& text = sub.text;
-			d2drt->DrawText(text.c_str(), text.size(), param.textFormat.Get(), pos, brushWhite.Get());
+			
+			ComPtr<IDWriteTextLayout> textLayout;
+			param.m_pDWriteFactory->CreateTextLayout(text.c_str(), text.size(), param.textFormat.Get(), param.viewWidth, param.viewHeight, &textLayout);
+
+			textLayout->Draw(0, param.textRenderer.Get(), 0, 0);
 			i++;
 		}
 	}
