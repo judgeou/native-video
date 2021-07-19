@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <vector>
+#include <list>
 #include <string>
 #include <chrono>
 #include <thread>
@@ -52,6 +53,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 using Microsoft::WRL::ComPtr;
 
 using std::vector;
+using std::list;
 using std::string;
 using std::wstring;
 using std::make_shared;
@@ -121,8 +123,7 @@ std::wstring AskVideoFilePath() {
 
 struct Subtitle {
 	std::string text;
-	double duration;
-	bool rendered;
+	double timeleft; //  £”‡ ±º‰
 };
 
 struct DecoderParam
@@ -176,7 +177,7 @@ struct ScenceParam {
 	bool triggerFullScreen;
 	DXGI_MODE_DESC1 fullScreenModeDesc;
 
-	vector<Subtitle> subtitles;
+	list<Subtitle> subtitles;
 
 	// D2D
 	ComPtr<ID2D1Factory> d2dfa;
@@ -237,6 +238,20 @@ void CreateTextFormat(IDWriteFactory* m_pDWriteFactory, int height, IDWriteTextF
 	auto p_textFormat = *textFormat;
 	p_textFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
 	p_textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_FAR);
+}
+
+void SetSubtitlesNextState (list<Subtitle>& subtitles, double second) {
+	for (auto i = subtitles.begin(); i != subtitles.end();) {
+		auto& sub = *i;
+		sub.timeleft -= second;
+
+		if (sub.timeleft <= 0) {
+			subtitles.erase(i++);
+		}
+		else {
+			i++;
+		}
+	}
 }
 
 void InitDecoder(const char* filePath, DecoderParam& param) {
@@ -754,15 +769,23 @@ void UpdateVideoTexture(AVFrame* frame, const ScenceParam& scenceParam, const De
 void UpdateSubtitlesTexture(ScenceParam& param) {
 	auto& d2drt = param.d2drt;
 	d2drt->BeginDraw();
-
 	d2drt->Clear(D2D1::ColorF(0, 0, 0, 0));
+
 	ComPtr<ID2D1SolidColorBrush> brushWhite;
 	param.d2drt->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 1), &brushWhite);
-	auto pos = D2D1::RectF(0, 0, param.viewWidth, param.viewHeight);
 
-	for (auto& sub : param.subtitles) {
-		wstring text = u8tow(sub.text);
-		d2drt->DrawText(text.c_str(), text.size(), param.textFormat.Get(), pos, brushWhite.Get());
+	auto& subtitles = param.subtitles;
+	for (auto i = subtitles.begin(); i != subtitles.end();) {
+		auto& sub = *i;
+		if (sub.timeleft <= 0) {
+			subtitles.erase(i++);
+		}
+		else {
+			auto pos = D2D1::RectF(0, 0, param.viewWidth, param.viewHeight);
+			wstring text = u8tow(sub.text);
+			d2drt->DrawText(text.c_str(), text.size(), param.textFormat.Get(), pos, brushWhite.Get());
+			i++;
+		}
 	}
 	d2drt->EndDraw();
 }
@@ -770,14 +793,11 @@ void UpdateSubtitlesTexture(ScenceParam& param) {
 void AddSubtitles(ScenceParam& param, AVSubtitle& sub, double duration) {
 	if (sub.format == 1) {
 		int num = sub.num_rects;
-		vector<Subtitle> subs;
 
 		for (int i = 0; i < num; i++) {
 			auto rect = sub.rects[i];
-			subs.push_back({ rect->ass, duration });
+			param.subtitles.push_back({ rect->ass, duration });
 		}
-
-		param.subtitles = subs;
 	}
 }
 
@@ -975,6 +995,8 @@ int WINAPI WinMain(
 
 					if (freqRatio >= countRatio) {
 						UpdateVideoTexture(frame, scenceParam, decoderParam);
+						SetSubtitlesNextState(scenceParam.subtitles, 1 / frameFreq);
+						UpdateSubtitlesTexture(scenceParam);
 					}
 				}
 				else if (mediaFrame.type == AVMEDIA_TYPE_AUDIO) {
@@ -989,7 +1011,6 @@ int WINAPI WinMain(
 					auto& sub = mediaFrame.sub;
 					auto& duration = mediaFrame.duration;
 					AddSubtitles(scenceParam, sub, duration);
-					UpdateSubtitlesTexture(scenceParam);
 					avsubtitle_free(&sub);
 				}
 
