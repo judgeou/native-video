@@ -72,6 +72,7 @@ struct MediaFrame {
 	AVMediaType type;
 	AVFrame* frame;
 	AVSubtitle sub;
+	double duration; // second
 };
 
 string w2s(const wstring& wstr) {
@@ -120,6 +121,8 @@ std::wstring AskVideoFilePath() {
 
 struct Subtitle {
 	std::string text;
+	double duration;
+	bool rendered;
 };
 
 struct DecoderParam
@@ -136,6 +139,7 @@ struct DecoderParam
 	std::map<int, AVCodecContext*> codecMap;
 	shared_ptr<nv::AudioPlayer> audioPlayer;
 
+	double subtitleTimeBase;
 	float durationSecond;
 	float currentSecond;
 	bool isJumpProgress;
@@ -278,6 +282,9 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 					avcodec_open2(subcodecCtx, codec, NULL);
 					param.codecMap[i] = subcodecCtx;
 
+					auto timebase = fmtCtx->streams[i]->time_base;
+					param.subtitleTimeBase = (double)timebase.num / timebase.den;
+
 					auto subinfo = u8tow((char*)subcodecCtx->extradata);
 					subinfo.size();
 				}
@@ -311,10 +318,11 @@ MediaFrame RequestFrame(DecoderParam& param) {
 					AVSubtitle sub = {};
 					int got_sub_ptr = 0;
 					avcodec_decode_subtitle2(codecCtx, &sub, &got_sub_ptr, packet);
+					auto duration = packet->duration * param.subtitleTimeBase;
 					av_packet_unref(packet);
 
 					if (got_sub_ptr) {
-						return { AVMEDIA_TYPE_SUBTITLE, nullptr, sub };
+						return { AVMEDIA_TYPE_SUBTITLE, nullptr, sub, duration };
 					}
 					else {
 						return { AVMEDIA_TYPE_UNKNOWN, nullptr };
@@ -654,22 +662,6 @@ void Draw(
 		}
 	}
 
-	// D2D
-	{
-		auto& d2drt = param.d2drt;
-		d2drt->BeginDraw();
-		d2drt->Clear(D2D1::ColorF(0, 0, 0, 0));
-
-		ComPtr<ID2D1SolidColorBrush> brushWhite;
-		param.d2drt->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 1), &brushWhite);
-
-		auto pos = D2D1::RectF(0, 0, param.viewWidth, param.viewHeight);
-		wstring text = L"123, Hello World ÄãºÃÊÀ½ç ¤³¤ó¤Ë¤Á¤Ï";
-		d2drt->DrawText(text.c_str(), text.size(), param.textFormat.Get(), pos, brushWhite.Get());
-
-		d2drt->EndDraw();
-	}
-
 	UINT stride = sizeof(Vertex);
 	UINT offset = 0u;
 	ID3D11Buffer* vertexBuffers[] = { param.pVertexBuffer.Get() };
@@ -759,14 +751,30 @@ void UpdateVideoTexture(AVFrame* frame, const ScenceParam& scenceParam, const De
 	deviceCtx->Flush();
 }
 
-void UpdateSubtitles(ScenceParam& param, AVSubtitle& sub) {
+void UpdateSubtitlesTexture(ScenceParam& param) {
+	auto& d2drt = param.d2drt;
+	d2drt->BeginDraw();
+
+	d2drt->Clear(D2D1::ColorF(0, 0, 0, 0));
+	ComPtr<ID2D1SolidColorBrush> brushWhite;
+	param.d2drt->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 1), &brushWhite);
+	auto pos = D2D1::RectF(0, 0, param.viewWidth, param.viewHeight);
+
+	for (auto& sub : param.subtitles) {
+		wstring text = u8tow(sub.text);
+		d2drt->DrawText(text.c_str(), text.size(), param.textFormat.Get(), pos, brushWhite.Get());
+	}
+	d2drt->EndDraw();
+}
+
+void AddSubtitles(ScenceParam& param, AVSubtitle& sub, double duration) {
 	if (sub.format == 1) {
 		int num = sub.num_rects;
 		vector<Subtitle> subs;
 
 		for (int i = 0; i < num; i++) {
 			auto rect = sub.rects[i];
-			subs.push_back({ rect->ass });
+			subs.push_back({ rect->ass, duration });
 		}
 
 		param.subtitles = subs;
@@ -979,7 +987,9 @@ int WINAPI WinMain(
 				}
 				else if (mediaFrame.type == AVMEDIA_TYPE_SUBTITLE) {
 					auto& sub = mediaFrame.sub;
-					UpdateSubtitles(scenceParam, sub);
+					auto& duration = mediaFrame.duration;
+					AddSubtitles(scenceParam, sub, duration);
+					UpdateSubtitlesTexture(scenceParam);
 					avsubtitle_free(&sub);
 				}
 
