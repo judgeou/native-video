@@ -163,6 +163,8 @@ struct ScenceParam {
 	ComPtr<ID3D11PixelShader> pPixelShader;
 	ComPtr<ID3D11PixelShader> pPixelShader_Subtitle;
 
+	ComPtr<ID3D11BlendState> blendState;
+
 	const UINT16 indices[6]{ 0,1,2, 0,2,3 };
 
 	int viewWidth;
@@ -475,6 +477,19 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 	device->CreatePixelShader(g_main_PS, sizeof(g_main_PS), nullptr, &param.pPixelShader);
 	device->CreatePixelShader(g_main_PS_Sub, sizeof(g_main_PS_Sub), nullptr, &param.pPixelShader_Subtitle);
 
+	// 创建透明混合状态
+	D3D11_BLEND_DESC omDesc = {};
+	omDesc.RenderTarget[0].BlendEnable = true;
+	omDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+	omDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+	omDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+	omDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+	omDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
+	omDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+	omDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+
+	device->CreateBlendState(&omDesc, param.blendState.GetAddressOf());
+
 	// imgui
 	ImGui_ImplDX11_Init(device, ctx);
 
@@ -709,6 +724,9 @@ void Draw(
 	// Draw Call
 	auto indicesSize = std::size(param.indices);
 	ctx->DrawIndexed(indicesSize, 0, 0);
+
+	// Set BlendState
+	ctx->OMSetBlendState(param.blendState.Get(), 0, 0xFFFFFFFF);
 
 	// Draw subTexture
 	ID3D11ShaderResourceView* srvs2[] = { param.subSrv.Get() };
