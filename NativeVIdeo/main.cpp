@@ -655,19 +655,9 @@ void SwitchFullScreen(IDXGISwapChain3* swapchain, ScenceParam& param) {
 	swapchain->GetFullscreenState(&state, NULL);
 	if (state) {
 		swapchain->SetFullscreenState(FALSE, NULL);
-		swapchain->ResizeBuffers(
-			0,
-			param.viewWidth, param.viewHeight,
-			DXGI_FORMAT_UNKNOWN,
-			0);
 	}
 	else {
 		swapchain->SetFullscreenState(TRUE, NULL);
-		swapchain->ResizeBuffers(
-			0,
-			param.fullScreenModeDesc.Width, param.fullScreenModeDesc.Height,
-			DXGI_FORMAT_UNKNOWN,
-			0);
 	}
 }
 
@@ -680,14 +670,17 @@ void Draw(
 
 		SwitchFullScreen(swapchain, param);
 	}
-	else {
-		// 必要时重新创建交换链
-		DXGI_SWAP_CHAIN_DESC swapDesc;
-		swapchain->GetDesc(&swapDesc);
-		auto& bufferDesc = swapDesc.BufferDesc;
-		if (bufferDesc.Width != param.viewWidth || bufferDesc.Height != param.viewHeight) {
-			swapchain->ResizeBuffers(swapDesc.BufferCount, param.viewWidth, param.viewHeight, bufferDesc.Format, swapDesc.Flags);
-		}
+	// 必要时重新创建交换链和字幕纹理
+	DXGI_SWAP_CHAIN_DESC swapDesc;
+	swapchain->GetDesc(&swapDesc);
+	auto& bufferDesc = swapDesc.BufferDesc;
+	if (bufferDesc.Width != param.viewWidth || bufferDesc.Height != param.viewHeight) {
+		swapchain->ResizeBuffers(swapDesc.BufferCount, param.viewWidth, param.viewHeight, bufferDesc.Format, swapDesc.Flags);
+
+		CreateSubTexture(device, param.viewWidth, param.viewHeight, &param.subTexture, &param.subSrv);
+		CreateD2DRenderTarget(param.d2dfa.Get(), param.subTexture.Get(), &param.d2drt);
+		CreateTextFormat(param.m_pDWriteFactory.Get(), param.viewHeight, &param.textFormat);
+		param.textRenderer = new DWriteColorTextRenderer::CustomTextRenderer(param.d2dfa, param.d2drt);
 	}
 
 	UINT stride = sizeof(Vertex);
