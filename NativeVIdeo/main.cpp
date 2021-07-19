@@ -6,6 +6,7 @@
 #include <thread>
 #include <map>
 #include <memory>
+#include <regex>
 
 #include <Windows.h>
 #include <windowsx.h>
@@ -91,6 +92,14 @@ wstring u8tow(const string& str) {
 	return wstr;
 }
 
+std::vector<std::wstring> split(const std::wstring& str, const std::wstring& regex_str)
+{
+	std::wregex regexz(regex_str);
+	std::vector<std::wstring> list(std::wsregex_token_iterator(str.begin(), str.end(), regexz, -1),
+		std::wsregex_token_iterator());
+	return list;
+}
+
 std::wstring AskVideoFilePath() {
 	using Microsoft::WRL::ComPtr;
 
@@ -122,7 +131,7 @@ std::wstring AskVideoFilePath() {
 }
 
 struct Subtitle {
-	std::string text;
+	std::wstring text;
 	double timeleft; // Ê£ÓàÊ±¼ä
 };
 
@@ -300,8 +309,10 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 					auto timebase = fmtCtx->streams[i]->time_base;
 					param.subtitleTimeBase = (double)timebase.num / timebase.den;
 
-					auto subinfo = u8tow((char*)subcodecCtx->extradata);
-					subinfo.size();
+					if (subcodecCtx->extradata) {
+						auto subinfo = u8tow((char*)subcodecCtx->extradata);
+						subinfo.size();
+					}
 				}
 				break;
 			}
@@ -782,7 +793,7 @@ void UpdateSubtitlesTexture(ScenceParam& param) {
 		}
 		else {
 			auto pos = D2D1::RectF(0, 0, param.viewWidth, param.viewHeight);
-			wstring text = u8tow(sub.text);
+			wstring& text = sub.text;
 			d2drt->DrawText(text.c_str(), text.size(), param.textFormat.Get(), pos, brushWhite.Get());
 			i++;
 		}
@@ -796,7 +807,14 @@ void AddSubtitles(ScenceParam& param, AVSubtitle& sub, double duration) {
 
 		for (int i = 0; i < num; i++) {
 			auto rect = sub.rects[i];
-			param.subtitles.push_back({ rect->ass, duration });
+			wstring ass = u8tow(rect->ass);
+			auto assItems = split(ass, L",");
+
+			if (assItems.size() >= 10) {
+				wstring& text = assItems[9];
+				param.subtitles.push_back({ text, duration });
+			}
+			
 		}
 	}
 }
@@ -855,7 +873,7 @@ int WINAPI WinMain(
 
 	int windowWidth = 1280;
 	int windowHeight = 720;
-	auto window = CreateWindow(className, L"Hello World", WS_OVERLAPPEDWINDOW, 100, 100, windowWidth, windowHeight, NULL, NULL, hInstance, NULL);
+	auto window = CreateWindow(className, L"Hello World", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL, hInstance, NULL);
 	ShowWindow(window, SW_SHOW);
 
 	auto filePath = w2s(AskVideoFilePath());
