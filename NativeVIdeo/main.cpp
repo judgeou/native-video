@@ -1,4 +1,4 @@
-ï»¿#include <stdio.h>
+#include <stdio.h>
 #include <vector>
 #include <string>
 #include <chrono>
@@ -64,6 +64,7 @@ struct Vertex {
 struct MediaFrame {
 	AVMediaType type;
 	AVFrame* frame;
+	AVSubtitle sub;
 };
 
 string w2s(const wstring& wstr) {
@@ -71,6 +72,13 @@ string w2s(const wstring& wstr) {
 	string str(len, '\0');
 	WideCharToMultiByte(CP_ACP, 0, wstr.c_str(), wstr.size(), &str[0], str.size(), NULL, NULL);
 	return str;
+}
+
+wstring u8tow(const string& str) {
+	int len = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), str.size(), NULL, 0);
+	wstring wstr(len, '\0');
+	MultiByteToWideChar(CP_UTF8, 0, str.c_str(), str.size(), &wstr[0], wstr.size());
+	return wstr;
 }
 
 std::wstring AskVideoFilePath() {
@@ -81,7 +89,7 @@ std::wstring AskVideoFilePath() {
 	CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_ALL,
 		IID_IFileOpenDialog, reinterpret_cast<void**>(fileDialog.GetAddressOf()));
 
-	fileDialog->SetTitle(L"é€‰æ‹©è§†é¢‘æ–‡ä»¶");
+	fileDialog->SetTitle(L"Ñ¡ÔñÊÓÆµÎÄ¼ş");
 
 	COMDLG_FILTERSPEC rgSpec[] =
 	{
@@ -103,15 +111,21 @@ std::wstring AskVideoFilePath() {
 	}
 }
 
+struct Subtitle {
+	std::string text;
+};
+
 struct DecoderParam
 {
 	AVFormatContext* fmtCtx;
 	AVCodecContext* vcodecCtx;
 	AVCodecContext* acodecCtx;
+	AVCodecContext* subcodecCtx;
 	int width;
 	int height;
 	int videoStreamIndex;
 	int audioStreamIndex;
+	int subtitleStreamIndex;
 	std::map<int, AVCodecContext*> codecMap;
 	shared_ptr<nv::AudioPlayer> audioPlayer;
 
@@ -129,7 +143,7 @@ struct ScenceParam {
 	ComPtr<ID3D11Buffer> pConstantBuffer;
 	ComPtr<ID3D11InputLayout> pInputLayout;
 	ComPtr<ID3D11VertexShader> pVertexShader;
-	
+
 	ComPtr<ID3D11Texture2D> texture;
 	HANDLE sharedHandle;
 	ComPtr<ID3D11ShaderResourceView> srvY;
@@ -145,7 +159,7 @@ struct ScenceParam {
 	bool triggerFullScreen;
 	DXGI_MODE_DESC1 fullScreenModeDesc;
 
-	ImFont* myfont;
+	vector<Subtitle> subtitles;
 };
 
 void InitDecoder(const char* filePath, DecoderParam& param) {
@@ -155,32 +169,52 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 
 	AVCodecContext* vcodecCtx = nullptr;
 	AVCodecContext* acodecCtx = nullptr;
+	AVCodecContext* subcodecCtx = nullptr;
 	for (int i = 0; i < fmtCtx->nb_streams; i++) {
 		const AVCodec* codec = avcodec_find_decoder(fmtCtx->streams[i]->codecpar->codec_id);
-		if (codec && codec->type == AVMEDIA_TYPE_VIDEO) {
-			param.videoStreamIndex = i;
-			param.vcodecCtx = vcodecCtx = avcodec_alloc_context3(codec);
-			avcodec_parameters_to_context(vcodecCtx, fmtCtx->streams[i]->codecpar);
-			avcodec_open2(vcodecCtx, codec, NULL);
-			param.codecMap[i] = vcodecCtx;
-		}
-		if (codec && codec->type == AVMEDIA_TYPE_AUDIO) {
-			param.audioStreamIndex = i;
-			param.acodecCtx = acodecCtx = avcodec_alloc_context3(codec);
-			avcodec_parameters_to_context(acodecCtx, fmtCtx->streams[i]->codecpar);
-			avcodec_open2(acodecCtx, codec, NULL);
-			param.codecMap[i] = acodecCtx;
+		if (codec) {
+			switch (codec->type) {
+			case AVMEDIA_TYPE_VIDEO: {
+				param.videoStreamIndex = i;
+				param.vcodecCtx = vcodecCtx = avcodec_alloc_context3(codec);
+				avcodec_parameters_to_context(vcodecCtx, fmtCtx->streams[i]->codecpar);
+				avcodec_open2(vcodecCtx, codec, NULL);
+				param.codecMap[i] = vcodecCtx;
+				break;
+			}
+			case AVMEDIA_TYPE_AUDIO: {
+				param.audioStreamIndex = i;
+				param.acodecCtx = acodecCtx = avcodec_alloc_context3(codec);
+				avcodec_parameters_to_context(acodecCtx, fmtCtx->streams[i]->codecpar);
+				avcodec_open2(acodecCtx, codec, NULL);
+				param.codecMap[i] = acodecCtx;
 
-			// åˆå§‹åŒ– AudioPlayerï¼Œæ— è®ºå¦‚ä½•å›ºå®šä½¿ç”¨åŒå£°é“
-			param.audioPlayer = make_shared<nv::AudioPlayer>(2, acodecCtx->sample_rate);
-			param.audioPlayer->Start();
-			constexpr float defaultVolume = 0.5;
-			param.audioPlayer->SetVolume(defaultVolume);
-			param.audioVolume = defaultVolume;
+				// ³õÊ¼»¯ AudioPlayer£¬ÎŞÂÛÈçºÎ¹Ì¶¨Ê¹ÓÃË«ÉùµÀ
+				param.audioPlayer = make_shared<nv::AudioPlayer>(2, acodecCtx->sample_rate);
+				param.audioPlayer->Start();
+				constexpr float defaultVolume = 0.5;
+				param.audioPlayer->SetVolume(defaultVolume);
+				param.audioVolume = defaultVolume;
+				break;
+			}
+			case AVMEDIA_TYPE_SUBTITLE: {
+				if (subcodecCtx == nullptr) {
+					param.subtitleStreamIndex = i;
+					subcodecCtx = param.subcodecCtx = avcodec_alloc_context3(codec);
+					avcodec_parameters_to_context(subcodecCtx, fmtCtx->streams[i]->codecpar);
+					avcodec_open2(subcodecCtx, codec, NULL);
+					param.codecMap[i] = subcodecCtx;
+
+					auto subinfo = u8tow((char*)subcodecCtx->extradata);
+					subinfo.size();
+				}
+				break;
+			}
+			}
 		}
 	}
 
-	// å¯ç”¨ç¡¬ä»¶è§£ç å™¨
+	// ÆôÓÃÓ²¼ş½âÂëÆ÷
 	AVBufferRef* hw_device_ctx = nullptr;
 	av_hwdevice_ctx_create(&hw_device_ctx, AVHWDeviceType::AV_HWDEVICE_TYPE_D3D11VA, NULL, NULL, NULL);
 	vcodecCtx->hw_device_ctx = hw_device_ctx;
@@ -197,9 +231,24 @@ MediaFrame RequestFrame(DecoderParam& param) {
 	while (1) {
 		AVPacket* packet = av_packet_alloc();
 		int ret = av_read_frame(fmtCtx, packet);
-		if (ret == 0) {
+		if (ret == 0 && (packet->stream_index == param.videoStreamIndex || packet->stream_index == param.audioStreamIndex || packet->stream_index == param.subtitleStreamIndex)) {
 			auto codecCtx = param.codecMap[packet->stream_index];
 			if (codecCtx) {
+				if (codecCtx->codec_type == AVMEDIA_TYPE_SUBTITLE) {
+					AVSubtitle sub = {};
+					int got_sub_ptr = 0;
+					avcodec_decode_subtitle2(codecCtx, &sub, &got_sub_ptr, packet);
+					av_packet_unref(packet);
+
+					if (got_sub_ptr) {
+						return { AVMEDIA_TYPE_SUBTITLE, nullptr, sub };
+					}
+					else {
+						return { AVMEDIA_TYPE_UNKNOWN, nullptr };
+					}
+
+				}
+
 				ret = avcodec_send_packet(codecCtx, packet);
 				if (ret == 0) {
 					AVFrame* frame = av_frame_alloc();
@@ -230,7 +279,7 @@ void ReleaseDecoder(DecoderParam& param) {
 }
 
 void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& param, const DecoderParam& decoderParam) {
-	// é¡¶ç‚¹è¾“å…¥
+	// ¶¥µãÊäÈë
 	const Vertex vertices[] = {
 		{-1,	1,	0,	0,	0},
 		{1,		1,	0,	1,	0},
@@ -256,7 +305,7 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 
 	device->CreateBuffer(&ibd, &isd, &param.pIndexBuffer);
 
-	// å¸¸é‡ç¼“å†²åŒº
+	// ³£Á¿»º³åÇø
 	auto constant = dx::XMMatrixScaling(1, 1, 1);
 	constant = dx::XMMatrixTranspose(constant);
 	D3D11_BUFFER_DESC cbd = {};
@@ -267,10 +316,10 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 	cbd.StructureByteStride = 0;
 	D3D11_SUBRESOURCE_DATA csd = {};
 	csd.pSysMem = &constant;
-	
+
 	device->CreateBuffer(&cbd, &csd, &param.pConstantBuffer);
 
-	// é¡¶ç‚¹ç€è‰²å™¨
+	// ¶¥µã×ÅÉ«Æ÷
 	D3D11_INPUT_ELEMENT_DESC ied[] = {
 		{"POSITION", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
 		{"TEXCOORD", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0}
@@ -281,7 +330,7 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 
 	AVPixelFormat pixelForamt = decoderParam.vcodecCtx->pix_fmt;
 
-	// çº¹ç†åˆ›å»º
+	// ÎÆÀí´´½¨
 	static const std::map<AVPixelFormat, DXGI_FORMAT> textureForamtMap = {
 		{ AV_PIX_FMT_YUV420P, DXGI_FORMAT_NV12 },
 		{ AV_PIX_FMT_YUV420P10, DXGI_FORMAT_P010 },
@@ -299,12 +348,12 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 	tdesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 	device->CreateTexture2D(&tdesc, nullptr, &param.texture);
 
-	// åˆ›å»ºçº¹ç†å…±äº«å¥æŸ„
+	// ´´½¨ÎÆÀí¹²Ïí¾ä±ú
 	ComPtr<IDXGIResource> dxgiShareTexture;
 	param.texture->QueryInterface(__uuidof(IDXGIResource), (void**)dxgiShareTexture.GetAddressOf());
 	dxgiShareTexture->GetSharedHandle(&param.sharedHandle);
 
-	// åˆ›å»ºç€è‰²å™¨èµ„æº
+	// ´´½¨×ÅÉ«Æ÷×ÊÔ´
 	static const std::map<AVPixelFormat, DXGI_FORMAT> srvYForamt = {
 		{ AV_PIX_FMT_YUV420P, DXGI_FORMAT_R8_UNORM },
 		{ AV_PIX_FMT_YUV420P10, DXGI_FORMAT_R16_UNORM },
@@ -340,7 +389,7 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 		&param.srvUV
 	);
 
-	// åˆ›å»ºé‡‡æ ·å™¨
+	// ´´½¨²ÉÑùÆ÷
 	D3D11_SAMPLER_DESC samplerDesc = {};
 	samplerDesc.Filter = D3D11_FILTER::D3D11_FILTER_ANISOTROPIC;
 	samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
@@ -350,19 +399,14 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 
 	device->CreateSamplerState(&samplerDesc, &param.pSampler);
 
-	// åƒç´ ç€è‰²å™¨
+	// ÏñËØ×ÅÉ«Æ÷
 	device->CreatePixelShader(g_main_PS, sizeof(g_main_PS), nullptr, &param.pPixelShader);
 
 	// imgui
 	ImGui_ImplDX11_Init(device, ctx);
-
-	auto& imgui_io = ImGui::GetIO();
-	auto font2 = imgui_io.Fonts->AddFontFromFileTTF("D:\\simhei.ttf", 16, NULL, imgui_io.Fonts->GetGlyphRangesChineseFull());
-	imgui_io.Fonts->Build();
-	param.myfont = font2;
 }
 
-// é€šè¿‡çª—å£æ¯”ä¾‹ä¸è§†é¢‘æ¯”ä¾‹çš„è®¡ç®—ï¼Œå¾—å‡ºåˆé€‚çš„ç¼©æ”¾çŸ©é˜µï¼Œå†™å…¥å¸¸é‡ç¼“å†²ã€‚
+// Í¨¹ı´°¿Ú±ÈÀıÓëÊÓÆµ±ÈÀıµÄ¼ÆËã£¬µÃ³öºÏÊÊµÄËõ·Å¾ØÕó£¬Ğ´Èë³£Á¿»º³å¡£
 void FitQuadSize(
 	ID3D11DeviceContext* ctx, ID3D11Buffer* constant,
 	int videoWidth, int videoHeight, int viewWidth, int viewHeight
@@ -396,18 +440,17 @@ void DrawImgui(
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
 
-	// è¿™é‡Œå¼€å§‹å†™ç•Œé¢é€»è¾‘
+	// ÕâÀï¿ªÊ¼Ğ´½çÃæÂß¼­
 	// ImGui::ShowDemoWindow();
 	auto& io = ImGui::GetIO();
-	ImGui::PushFont(param.myfont);
 
-	// å…¨å±çª—å£æ§åˆ¶
+	// È«ÆÁ´°¿Ú¿ØÖÆ
 	auto isEnterDown = io.KeysDownDuration[VK_RETURN] == 0.0f;
 	if (isEnterDown) {
 		param.triggerFullScreen = true;
 	}
 
-	// æ»šè½®å¯ä»¥è°ƒæ•´éŸ³é‡
+	// ¹öÂÖ¿ÉÒÔµ÷ÕûÒôÁ¿
 	auto& audioVolume = decoderParam.audioVolume;
 	if (io.MouseWheel != 0) {
 		audioVolume += io.MouseWheel * 0.05;
@@ -425,7 +468,7 @@ void DrawImgui(
 	bool isShowWidgets = ((system_clock::now() - mouseStopTime) < hideMouseDelay) || io.WantCaptureMouse;
 
 	if (isShowWidgets) {
-		if (ImGui::Begin(u8"Playæ’­æ”¾")) {
+		if (ImGui::Begin("Play")) {
 			auto& playStatus = decoderParam.playStatus;
 			if (playStatus == 0) {
 				if (ImGui::Button("Pause")) {
@@ -461,13 +504,11 @@ void DrawImgui(
 		ImGui::End();
 	}
 
-	ImGui::PopFont();
-
 	ImGui::Render();
 	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 }
 
-// åˆ‡æ¢å…¨å±çŠ¶æ€
+// ÇĞ»»È«ÆÁ×´Ì¬
 void SwitchFullScreen(IDXGISwapChain3* swapchain, ScenceParam& param) {
 	DXGI_SWAP_CHAIN_DESC swapDesc;
 	swapchain->GetDesc(&swapDesc);
@@ -514,7 +555,7 @@ void Draw(
 
 	ctx->VSSetShader(param.pVertexShader.Get(), 0, 0);
 
-	// å…‰æ …åŒ–
+	// ¹âÕ¤»¯
 	D3D11_VIEWPORT viewPort = {};
 	viewPort.TopLeftX = 0;
 	viewPort.TopLeftY = 0;
@@ -525,7 +566,7 @@ void Draw(
 	ctx->RSSetViewports(1, &viewPort);
 
 	ctx->PSSetShader(param.pPixelShader.Get(), 0, 0);
-	
+
 	ID3D11ShaderResourceView* srvs[] = { param.srvY.Get(), param.srvUV.Get() };
 	ctx->PSSetShaderResources(0, std::size(srvs), srvs);
 
@@ -538,7 +579,7 @@ void Draw(
 		SwitchFullScreen(swapchain, param);
 	}
 	else {
-		// å¿…è¦æ—¶é‡æ–°åˆ›å»ºäº¤æ¢é“¾
+		// ±ØÒªÊ±ÖØĞÂ´´½¨½»»»Á´
 		DXGI_SWAP_CHAIN_DESC swapDesc;
 		swapchain->GetDesc(&swapDesc);
 		auto& bufferDesc = swapDesc.BufferDesc;
@@ -547,7 +588,7 @@ void Draw(
 		}
 	}
 
-	// è¾“å‡ºåˆå¹¶
+	// Êä³öºÏ²¢
 	ComPtr<ID3D11Texture2D> backBuffer;
 	swapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&backBuffer);
 
@@ -590,6 +631,20 @@ void UpdateVideoTexture(AVFrame* frame, const ScenceParam& scenceParam, const De
 	deviceCtx->Flush();
 }
 
+void UpdateSubtitles(ScenceParam& param, AVSubtitle& sub) {
+	if (sub.format == 1) {
+		int num = sub.num_rects;
+		vector<Subtitle> subs;
+
+		for (int i = 0; i < num; i++) {
+			auto rect = sub.rects[i];
+			subs.push_back({ rect->ass });
+		}
+
+		param.subtitles = subs;
+	}
+}
+
 double GetFrameFreq(const DecoderParam& param) {
 	auto avg_frame_rate = param.fmtCtx->streams[param.videoStreamIndex]->avg_frame_rate;
 	auto framerate = param.vcodecCtx->framerate;
@@ -602,7 +657,7 @@ double GetFrameFreq(const DecoderParam& param) {
 	}
 }
 
-int WINAPI WinMain (
+int WINAPI WinMain(
 	_In_ HINSTANCE hInstance,
 	_In_opt_ HINSTANCE hPrevInstance,
 	_In_ LPSTR lpCmdLine,
@@ -644,10 +699,13 @@ int WINAPI WinMain (
 
 	int windowWidth = 1280;
 	int windowHeight = 720;
-	auto window = CreateWindow(className, L"Hello World ï¿½ï¿½ï¿½ï¿½", WS_OVERLAPPEDWINDOW, 100, 100, windowWidth, windowHeight, NULL, NULL, hInstance, NULL);
+	auto window = CreateWindow(className, L"Hello World", WS_OVERLAPPEDWINDOW, 100, 100, windowWidth, windowHeight, NULL, NULL, hInstance, NULL);
 	ShowWindow(window, SW_SHOW);
 
 	auto filePath = w2s(AskVideoFilePath());
+	if (filePath == "") {
+		return -1;
+	}
 
 	DecoderParam decoderParam = {};
 	ScenceParam scenceParam = {};
@@ -658,7 +716,7 @@ int WINAPI WinMain (
 	auto& height = decoderParam.height;
 	auto& fmtCtx = decoderParam.fmtCtx;
 	auto& vcodecCtx = decoderParam.vcodecCtx;
-	
+
 	RECT clientRect;
 	GetClientRect(window, &clientRect);
 	int clientWidth = clientRect.right - clientRect.left;
@@ -716,10 +774,10 @@ int WINAPI WinMain (
 	modeDesc.Width = outputDesc.DesktopCoordinates.right - outputDesc.DesktopCoordinates.left;
 	modeDesc.Height = outputDesc.DesktopCoordinates.bottom - outputDesc.DesktopCoordinates.top;
 	modeDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_PROGRESSIVE;
-	
+
 	pIDXGIOutput1->FindClosestMatchingMode1(&modeDesc, &modeDesc, 0);
 	scenceParam.fullScreenModeDesc = modeDesc;
-	
+
 	scenceParam.viewWidth = clientWidth;
 	scenceParam.viewHeight = clientHeight;
 
@@ -728,12 +786,12 @@ int WINAPI WinMain (
 
 	InitScence(d3ddeivce.Get(), d3ddeviceCtx.Get(), scenceParam, decoderParam);
 
-	// å±å¹•åˆ·æ–°ç‡
+	// ÆÁÄ»Ë¢ĞÂÂÊ
 	auto displayFreq = (double)modeDesc.RefreshRate.Numerator / modeDesc.RefreshRate.Denominator;
 
-	// è®°å½•å±å¹•å‘ˆç°äº†å¤šå°‘å¸§
+	// ¼ÇÂ¼ÆÁÄ»³ÊÏÖÁË¶àÉÙÖ¡
 	int displayCount = 1;
-	// è®°å½•è§†é¢‘æ’­æ”¾äº†å¤šå°‘å¸§
+	// ¼ÇÂ¼ÊÓÆµ²¥·ÅÁË¶àÉÙÖ¡
 	int frameCount = 1;
 
 	decoderParam.durationSecond = (double)fmtCtx->duration / AV_TIME_BASE;
@@ -754,7 +812,7 @@ int WINAPI WinMain (
 			double frameFreq = GetFrameFreq(decoderParam);
 			double freqRatio = displayFreq / frameFreq;
 			double countRatio = (double)displayCount / frameCount;
-			
+
 			while (frameCount == 1 || (freqRatio < countRatio && decoderParam.playStatus == 0)) {
 				if (decoderParam.isJumpProgress) {
 					decoderParam.isJumpProgress = false;
@@ -769,7 +827,7 @@ int WINAPI WinMain (
 				auto mediaFrame = RequestFrame(decoderParam);
 				auto& frame = mediaFrame.frame;
 
-				if (frame == nullptr) {
+				if (mediaFrame.type == AVMEDIA_TYPE_UNKNOWN) {
 					break;
 				}
 
@@ -791,15 +849,23 @@ int WINAPI WinMain (
 						decoderParam.audioPlayer->WriteS16((short*)frame->data[0], frame->nb_samples);
 					}
 				}
+				else if (mediaFrame.type == AVMEDIA_TYPE_SUBTITLE) {
+					auto& sub = mediaFrame.sub;
+					UpdateSubtitles(scenceParam, sub);
+					avsubtitle_free(&sub);
+				}
 
 				av_frame_free(&mediaFrame.frame);
 			}
 
-			Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain3.Get(), scenceParam, decoderParam);
+			if (scenceParam.viewWidth > 0 && scenceParam.viewHeight > 0) {
+				Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain3.Get(), scenceParam, decoderParam);
+			}
 			
+
 			pIDXGIOutput1->WaitForVBlank();
 			swapChain3->Present(0, 0);
-			
+
 			if (decoderParam.playStatus == 0) {
 				displayCount++;
 			}
