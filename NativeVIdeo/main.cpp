@@ -858,7 +858,10 @@ int WINAPI WinMain(
 				av_frame_free(&mediaFrame.frame);
 			}
 
-			Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain3.Get(), scenceParam, decoderParam);
+			if (scenceParam.viewWidth > 0 && scenceParam.viewHeight > 0) {
+				Draw(d3ddeivce.Get(), d3ddeviceCtx.Get(), swapChain3.Get(), scenceParam, decoderParam);
+			}
+			
 
 			pIDXGIOutput1->WaitForVBlank();
 			swapChain3->Present(0, 0);
