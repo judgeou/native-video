@@ -30,6 +30,12 @@ extern "C" {
 #include <d3d11.h>
 #pragma comment(lib, "d3d11.lib")
 #include <dxgi1_4.h>
+
+#include <d2d1.h>
+#pragma comment(lib, "d2d1.lib")
+#include <dwrite.h>
+#pragma comment(lib, "dwrite.lib")
+
 #include <DirectXMath.h>
 namespace dx = DirectX;
 
@@ -39,6 +45,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 #include "VertexShader.h"
 #include "PixelShader.h"
+#include "PixelShader_Subtitle.h"
 
 #include "AudioPlayer.h"
 
@@ -141,16 +148,20 @@ struct ScenceParam {
 	ComPtr<ID3D11Buffer> pVertexBuffer;
 	ComPtr<ID3D11Buffer> pIndexBuffer;
 	ComPtr<ID3D11Buffer> pConstantBuffer;
+	ComPtr<ID3D11Buffer> pConstantBufferSub;
 	ComPtr<ID3D11InputLayout> pInputLayout;
 	ComPtr<ID3D11VertexShader> pVertexShader;
 
 	ComPtr<ID3D11Texture2D> texture;
+	ComPtr<ID3D11Texture2D> subTexture;
 	HANDLE sharedHandle;
 	ComPtr<ID3D11ShaderResourceView> srvY;
 	ComPtr<ID3D11ShaderResourceView> srvUV;
+	ComPtr<ID3D11ShaderResourceView> subSrv;
 
 	ComPtr<ID3D11SamplerState> pSampler;
 	ComPtr<ID3D11PixelShader> pPixelShader;
+	ComPtr<ID3D11PixelShader> pPixelShader_Subtitle;
 
 	const UINT16 indices[6]{ 0,1,2, 0,2,3 };
 
@@ -160,7 +171,67 @@ struct ScenceParam {
 	DXGI_MODE_DESC1 fullScreenModeDesc;
 
 	vector<Subtitle> subtitles;
+
+	// D2D
+	ComPtr<ID2D1Factory> d2dfa;
+	ComPtr<IDWriteFactory> m_pDWriteFactory;
+	ComPtr<IDWriteTextFormat> textFormat;
+	ComPtr<ID2D1RenderTarget> d2drt;
+	// ComPtr<DWriteColorTextRenderer::CustomTextRenderer> textRenderer;
 };
+
+void CreateD2DRenderTarget(ID2D1Factory* d2dfa, ID3D11Texture2D* texture, ID2D1RenderTarget** d2drt) {
+	ComPtr<IDXGISurface> sur;
+	texture->QueryInterface(sur.GetAddressOf());
+
+	auto d2dPixelFormat = D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_PREMULTIPLIED);
+	auto props = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT, d2dPixelFormat);
+	d2dfa->CreateDxgiSurfaceRenderTarget(sur.Get(), &props, d2drt);
+}
+
+void CreateSubTexture(ID3D11Device* d3ddevice, int width, int height, ID3D11Texture2D** subTexture, ID3D11ShaderResourceView** srv) {
+	D3D11_TEXTURE2D_DESC subDesc = {};
+	subDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	subDesc.ArraySize = 1;
+	subDesc.MipLevels = 1;
+	subDesc.SampleDesc = { 1, 0 };
+	subDesc.Width = width;
+	subDesc.Height = height;
+	subDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+
+	d3ddevice->CreateTexture2D(&subDesc, NULL, subTexture);
+
+	// 创建着色器资源
+	D3D11_SHADER_RESOURCE_VIEW_DESC const srvDesc = CD3D11_SHADER_RESOURCE_VIEW_DESC(
+		*subTexture,
+		D3D11_SRV_DIMENSION_TEXTURE2D,
+		subDesc.Format
+	);
+
+	d3ddevice->CreateShaderResourceView(
+		*subTexture,
+		&srvDesc,
+		srv
+	);
+}
+
+void CreateTextFormat(IDWriteFactory* m_pDWriteFactory, int height, IDWriteTextFormat** textFormat) {
+	FLOAT fontSize = height * 0.0567;
+
+	m_pDWriteFactory->CreateTextFormat(
+		L"Source Han Sans HW SC VF",
+		NULL,
+		DWRITE_FONT_WEIGHT_DEMI_BOLD,
+		DWRITE_FONT_STYLE_NORMAL,
+		DWRITE_FONT_STRETCH_NORMAL,
+		fontSize,
+		L"", //locale
+		textFormat
+	);
+	auto p_textFormat = *textFormat;
+	p_textFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+	p_textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_FAR);
+}
 
 void InitDecoder(const char* filePath, DecoderParam& param) {
 	AVFormatContext* fmtCtx = nullptr;
@@ -318,6 +389,7 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 	csd.pSysMem = &constant;
 
 	device->CreateBuffer(&cbd, &csd, &param.pConstantBuffer);
+	device->CreateBuffer(&cbd, &csd, &param.pConstantBufferSub);
 
 	// 顶点着色器
 	D3D11_INPUT_ELEMENT_DESC ied[] = {
@@ -401,9 +473,23 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 
 	// 像素着色器
 	device->CreatePixelShader(g_main_PS, sizeof(g_main_PS), nullptr, &param.pPixelShader);
+	device->CreatePixelShader(g_main_PS_Sub, sizeof(g_main_PS_Sub), nullptr, &param.pPixelShader_Subtitle);
 
 	// imgui
 	ImGui_ImplDX11_Init(device, ctx);
+
+	// D2D
+#ifdef _DEBUG
+	D2D1_FACTORY_OPTIONS d2dopts[] = { D2D1_DEBUG_LEVEL::D2D1_DEBUG_LEVEL_INFORMATION };
+#else
+	D2D1_FACTORY_OPTIONS d2dopts[] = { D2D1_DEBUG_LEVEL::D2D1_DEBUG_LEVEL_NONE };
+#endif
+
+	D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory), d2dopts, (void**)param.d2dfa.GetAddressOf());
+	DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), &param.m_pDWriteFactory);
+	CreateTextFormat(param.m_pDWriteFactory.Get(), param.viewHeight, &param.textFormat);
+	CreateSubTexture(device, param.viewWidth, param.viewHeight, &param.subTexture, &param.subSrv);
+	CreateD2DRenderTarget(param.d2dfa.Get(), param.subTexture.Get(), &param.d2drt);
 }
 
 // 通过窗口比例与视频比例的计算，得出合适的缩放矩阵，写入常量缓冲。
@@ -538,6 +624,37 @@ void Draw(
 	ID3D11Device* device, ID3D11DeviceContext* ctx, IDXGISwapChain3* swapchain,
 	ScenceParam& param, DecoderParam& decoderParam
 ) {
+	if (param.triggerFullScreen) {
+		param.triggerFullScreen = false;
+
+		SwitchFullScreen(swapchain, param);
+	}
+	else {
+		// 必要时重新创建交换链
+		DXGI_SWAP_CHAIN_DESC swapDesc;
+		swapchain->GetDesc(&swapDesc);
+		auto& bufferDesc = swapDesc.BufferDesc;
+		if (bufferDesc.Width != param.viewWidth || bufferDesc.Height != param.viewHeight) {
+			swapchain->ResizeBuffers(swapDesc.BufferCount, param.viewWidth, param.viewHeight, bufferDesc.Format, swapDesc.Flags);
+		}
+	}
+
+	// D2D
+	{
+		auto& d2drt = param.d2drt;
+		d2drt->BeginDraw();
+		d2drt->Clear(D2D1::ColorF(0, 0, 0, 0));
+
+		ComPtr<ID2D1SolidColorBrush> brushWhite;
+		param.d2drt->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 1), &brushWhite);
+
+		auto pos = D2D1::RectF(0, 0, param.viewWidth, param.viewHeight);
+		wstring text = L"123, Hello World 你好世界 こんにちは";
+		d2drt->DrawText(text.c_str(), text.size(), param.textFormat.Get(), pos, brushWhite.Get());
+
+		d2drt->EndDraw();
+	}
+
 	UINT stride = sizeof(Vertex);
 	UINT offset = 0u;
 	ID3D11Buffer* vertexBuffers[] = { param.pVertexBuffer.Get() };
@@ -573,21 +690,6 @@ void Draw(
 	ID3D11SamplerState* samplers[] = { param.pSampler.Get() };
 	ctx->PSSetSamplers(0, 1, samplers);
 
-	if (param.triggerFullScreen) {
-		param.triggerFullScreen = false;
-
-		SwitchFullScreen(swapchain, param);
-	}
-	else {
-		// 必要时重新创建交换链
-		DXGI_SWAP_CHAIN_DESC swapDesc;
-		swapchain->GetDesc(&swapDesc);
-		auto& bufferDesc = swapDesc.BufferDesc;
-		if (bufferDesc.Width != param.viewWidth || bufferDesc.Height != param.viewHeight) {
-			swapchain->ResizeBuffers(swapDesc.BufferCount, param.viewWidth, param.viewHeight, bufferDesc.Format, swapDesc.Flags);
-		}
-	}
-
 	// 输出合并
 	ComPtr<ID3D11Texture2D> backBuffer;
 	swapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&backBuffer);
@@ -606,6 +708,14 @@ void Draw(
 
 	// Draw Call
 	auto indicesSize = std::size(param.indices);
+	ctx->DrawIndexed(indicesSize, 0, 0);
+
+	// Draw subTexture
+	ID3D11ShaderResourceView* srvs2[] = { param.subSrv.Get() };
+	ID3D11Buffer* cbs2[] = { param.pConstantBufferSub.Get() };
+	ctx->VSSetConstantBuffers(0, 1, cbs2);
+	ctx->PSSetShader(param.pPixelShader_Subtitle.Get(), 0, 0);
+	ctx->PSSetShaderResources(0, std::size(srvs2), srvs2);
 	ctx->DrawIndexed(indicesSize, 0, 0);
 
 	DrawImgui(device, ctx, swapchain, param, decoderParam);
@@ -738,7 +848,7 @@ int WINAPI WinMain(
 	swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
 	swapChainDesc.Flags = 0;
 
-	UINT flags = 0;
+	UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 
 #ifdef DEBUG
 	flags |= D3D11_CREATE_DEVICE_DEBUG;
