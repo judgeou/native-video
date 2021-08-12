@@ -25,6 +25,10 @@ extern "C" {
 
 #include <libswscale/swscale.h>
 #pragma comment(lib, "swscale.lib")
+
+#include <ass/ass.h>
+#pragma comment(lib, "Ws2_32.lib")
+#pragma comment(lib, "libass.lib")
 }
 
 #include <d3d9.h>
@@ -77,6 +81,7 @@ struct MediaFrame {
 	AVFrame* frame;
 	AVSubtitle sub;
 	double duration; // second
+	double pts; // second
 };
 
 string w2s(const wstring& wstr) {
@@ -114,8 +119,9 @@ std::wstring AskVideoFilePath() {
 	COMDLG_FILTERSPEC rgSpec[] =
 	{
 		{ L"Video", L"*.mp4;*.mkv;*.flv;*.flac" },
+		{L"All", L"*"}
 	};
-	fileDialog->SetFileTypes(1, rgSpec);
+	fileDialog->SetFileTypes(std::size(rgSpec), rgSpec);
 	fileDialog->Show(NULL);
 
 	ComPtr<IShellItem> list;
@@ -157,6 +163,10 @@ struct DecoderParam
 	int playStatus;
 	system_clock::time_point mouseStopTime;
 	float audioVolume;
+
+	ASS_Library* asslib;
+	ASS_Track* ass_track;
+	ASS_Renderer* ass_renderer;
 };
 
 struct ScenceParam {
@@ -265,6 +275,18 @@ void SetSubtitlesNextState (list<Subtitle>& subtitles, double second) {
 }
 
 void InitDecoder(const char* filePath, DecoderParam& param) {
+	auto asslib = param.asslib = ass_library_init();
+
+	ass_set_message_cb(asslib, [](int level, const char* fmt, va_list args, void* data) {
+		static char str[256];
+		// sprintf_s(str, fmt, args);
+		OutputDebugStringA(fmt);
+	}, &param);
+
+	param.ass_track = ass_new_track(asslib);
+	param.ass_renderer = ass_renderer_init(asslib);
+	ass_set_fonts(param.ass_renderer, "Arial", NULL, ASS_FONTPROVIDER_AUTODETECT, NULL, 0);
+
 	AVFormatContext* fmtCtx = nullptr;
 	avformat_open_input(&fmtCtx, filePath, NULL, NULL);
 	avformat_find_stream_info(fmtCtx, NULL);
@@ -282,6 +304,8 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 				avcodec_parameters_to_context(vcodecCtx, fmtCtx->streams[i]->codecpar);
 				avcodec_open2(vcodecCtx, codec, NULL);
 				param.codecMap[i] = vcodecCtx;
+
+				ass_set_frame_size(param.ass_renderer, vcodecCtx->width, vcodecCtx->height);
 				break;
 			}
 			case AVMEDIA_TYPE_AUDIO: {
@@ -312,7 +336,7 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 
 					if (subcodecCtx->extradata) {
 						auto subinfo = u8tow((char*)subcodecCtx->extradata);
-						subinfo.size();
+						ass_process_codec_private(param.ass_track, (char*)subcodecCtx->extradata, subcodecCtx->extradata_size);
 					}
 				}
 				break;
@@ -345,11 +369,14 @@ MediaFrame RequestFrame(DecoderParam& param) {
 					AVSubtitle sub = {};
 					int got_sub_ptr = 0;
 					avcodec_decode_subtitle2(codecCtx, &sub, &got_sub_ptr, packet);
+					
 					auto duration = packet->duration * param.subtitleTimeBase;
+					auto pts = packet->pts * param.subtitleTimeBase;
+					
 					av_packet_unref(packet);
 
 					if (got_sub_ptr) {
-						return { AVMEDIA_TYPE_SUBTITLE, nullptr, sub, duration };
+						return { AVMEDIA_TYPE_SUBTITLE, nullptr, sub, duration, pts };
 					}
 					else {
 						return { AVMEDIA_TYPE_UNKNOWN, nullptr };
@@ -384,6 +411,7 @@ MediaFrame RequestFrame(DecoderParam& param) {
 void ReleaseDecoder(DecoderParam& param) {
 	avcodec_free_context(&param.vcodecCtx);
 	avformat_close_input(&param.fmtCtx);
+	ass_library_done(param.asslib);
 }
 
 void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& param, const DecoderParam& decoderParam) {
@@ -773,6 +801,8 @@ void UpdateVideoTexture(AVFrame* frame, const ScenceParam& scenceParam, const De
 }
 
 void UpdateSubtitlesTexture(ScenceParam& param) {
+
+
 	auto& d2drt = param.d2drt;
 	d2drt->BeginDraw();
 	d2drt->Clear(D2D1::ColorF(0, 0, 0, 0));
@@ -800,21 +830,19 @@ void UpdateSubtitlesTexture(ScenceParam& param) {
 	d2drt->EndDraw();
 }
 
-void AddSubtitles(ScenceParam& param, AVSubtitle& sub, double duration) {
+void AddSubtitles(DecoderParam& param, AVSubtitle& sub, double pts, double duration) {
 	if (sub.format == 1) {
 		int num = sub.num_rects;
 
 		for (int i = 0; i < num; i++) {
 			auto rect = sub.rects[i];
 			wstring ass = u8tow(rect->ass);
-			auto assItems = split(ass, L",");
-
-			if (assItems.size() >= 10) {
-				wstring& text = assItems[9];
-				param.subtitles.push_back({ text, duration });
-			}
+			string str = rect->ass;
 			
+			ass_process_chunk(param.ass_track, rect->ass, str.size(), pts * 1000, duration * 1000);
 		}
+
+		// ass_flush_events(param.ass_track);
 	}
 }
 
@@ -1012,6 +1040,13 @@ int WINAPI WinMain(
 
 					if (freqRatio >= countRatio) {
 						UpdateVideoTexture(frame, scenceParam, decoderParam);
+						
+						int isChange = 0;
+						auto ass_image = ass_render_frame(decoderParam.ass_renderer, decoderParam.ass_track, decoderParam.currentSecond * 1000, &isChange);
+						if (isChange == 1) {
+							// TODO äÖÈ¾×ÖÄ»
+						}
+						
 						SetSubtitlesNextState(scenceParam.subtitles, 1 / frameFreq);
 						UpdateSubtitlesTexture(scenceParam);
 					}
@@ -1027,7 +1062,8 @@ int WINAPI WinMain(
 				else if (mediaFrame.type == AVMEDIA_TYPE_SUBTITLE) {
 					auto& sub = mediaFrame.sub;
 					auto& duration = mediaFrame.duration;
-					AddSubtitles(scenceParam, sub, duration);
+					auto& pts = mediaFrame.pts;
+					AddSubtitles(decoderParam, sub, pts, duration);
 					avsubtitle_free(&sub);
 				}
 

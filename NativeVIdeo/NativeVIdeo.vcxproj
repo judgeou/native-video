@@ -78,13 +78,13 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(FFMPEG_INCLUDE);$(IncludePath)</IncludePath>
-    <LibraryPath>$(FFMPEG_LIB);$(LibraryPath)</LibraryPath>
+    <IncludePath>$(FFMPEG_INCLUDE);D:\vsproject\mpc-hc\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(FFMPEG_LIB);D:\vsproject\mpc-hc\bin\lib\Debug_x64;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(FFMPEG_INCLUDE);$(IncludePath)</IncludePath>
-    <LibraryPath>$(FFMPEG_LIB);$(LibraryPath)</LibraryPath>
+    <IncludePath>$(FFMPEG_INCLUDE);D:\vsproject\libass-msvc\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(FFMPEG_LIB);D:\vsproject\libass-msvc\bin\lib\Release_x64;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -122,6 +122,7 @@
       <PreprocessorDefinitions>DEBUG;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir)imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpplatest</LanguageStandard>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -138,6 +139,7 @@
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(ProjectDir)imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpplatest</LanguageStandard>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
