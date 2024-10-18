@@ -26,9 +26,6 @@ extern "C" {
 #include <libswscale/swscale.h>
 #pragma comment(lib, "swscale.lib")
 
-#include <ass/ass.h>
-#pragma comment(lib, "Ws2_32.lib")
-#pragma comment(lib, "libass.lib")
 }
 
 #include <d3d9.h>
@@ -88,6 +85,13 @@ string w2s(const wstring& wstr) {
 	int len = WideCharToMultiByte(CP_ACP, 0, wstr.c_str(), wstr.size(), NULL, 0, NULL, NULL);
 	string str(len, '\0');
 	WideCharToMultiByte(CP_ACP, 0, wstr.c_str(), wstr.size(), &str[0], str.size(), NULL, NULL);
+	return str;
+}
+
+string w2u8(const wstring& wstr) {
+	int len = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), wstr.size(), NULL, 0, NULL, NULL);
+	string str(len, '\0');
+	WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), wstr.size(), &str[0], str.size(), NULL, NULL);
 	return str;
 }
 
@@ -164,9 +168,6 @@ struct DecoderParam
 	system_clock::time_point mouseStopTime;
 	float audioVolume;
 
-	ASS_Library* asslib;
-	ASS_Track* ass_track;
-	ASS_Renderer* ass_renderer;
 };
 
 struct ScenceParam {
@@ -275,20 +276,9 @@ void SetSubtitlesNextState (list<Subtitle>& subtitles, double second) {
 }
 
 void InitDecoder(const char* filePath, DecoderParam& param) {
-	auto asslib = param.asslib = ass_library_init();
-
-	ass_set_message_cb(asslib, [](int level, const char* fmt, va_list args, void* data) {
-		static char str[256];
-		// sprintf_s(str, fmt, args);
-		OutputDebugStringA(fmt);
-	}, &param);
-
-	param.ass_track = ass_new_track(asslib);
-	param.ass_renderer = ass_renderer_init(asslib);
-	ass_set_fonts(param.ass_renderer, "Arial", NULL, ASS_FONTPROVIDER_AUTODETECT, NULL, 0);
 
 	AVFormatContext* fmtCtx = nullptr;
-	avformat_open_input(&fmtCtx, filePath, NULL, NULL);
+	auto ret = avformat_open_input(&fmtCtx, filePath, NULL, NULL);
 	avformat_find_stream_info(fmtCtx, NULL);
 
 	AVCodecContext* vcodecCtx = nullptr;
@@ -305,7 +295,6 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 				avcodec_open2(vcodecCtx, codec, NULL);
 				param.codecMap[i] = vcodecCtx;
 
-				ass_set_frame_size(param.ass_renderer, vcodecCtx->width, vcodecCtx->height);
 				break;
 			}
 			case AVMEDIA_TYPE_AUDIO: {
@@ -336,7 +325,6 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 
 					if (subcodecCtx->extradata) {
 						auto subinfo = u8tow((char*)subcodecCtx->extradata);
-						ass_process_codec_private(param.ass_track, (char*)subcodecCtx->extradata, subcodecCtx->extradata_size);
 					}
 				}
 				break;
@@ -411,7 +399,6 @@ MediaFrame RequestFrame(DecoderParam& param) {
 void ReleaseDecoder(DecoderParam& param) {
 	avcodec_free_context(&param.vcodecCtx);
 	avformat_close_input(&param.fmtCtx);
-	ass_library_done(param.asslib);
 }
 
 void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& param, const DecoderParam& decoderParam) {
@@ -839,7 +826,6 @@ void AddSubtitles(DecoderParam& param, AVSubtitle& sub, double pts, double durat
 			wstring ass = u8tow(rect->ass);
 			string str = rect->ass;
 			
-			ass_process_chunk(param.ass_track, rect->ass, str.size(), pts * 1000, duration * 1000);
 		}
 
 		// ass_flush_events(param.ass_track);
@@ -903,7 +889,8 @@ int WINAPI WinMain(
 	auto window = CreateWindow(className, L"Hello World", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL, hInstance, NULL);
 	ShowWindow(window, SW_SHOW);
 
-	auto filePath = w2s(AskVideoFilePath());
+	auto filePath = w2u8(AskVideoFilePath());
+	
 	if (filePath == "") {
 		return -1;
 	}
@@ -960,6 +947,9 @@ int WINAPI WinMain(
 	pIDXGIFactory->CreateSwapChainForHwnd(d3ddeivce.Get(), window, &swapChainDesc, NULL, NULL, &swapChain1);
 	ComPtr<IDXGISwapChain3> swapChain3;
 	swapChain1->QueryInterface<IDXGISwapChain3>(&swapChain3);
+
+	ComPtr<IDXGISwapChain> swapchain;
+	swapChain1.As(&swapchain);
 
 	// swapChain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020);
 
@@ -1042,10 +1032,7 @@ int WINAPI WinMain(
 						UpdateVideoTexture(frame, scenceParam, decoderParam);
 						
 						int isChange = 0;
-						auto ass_image = ass_render_frame(decoderParam.ass_renderer, decoderParam.ass_track, decoderParam.currentSecond * 1000, &isChange);
-						if (isChange == 1) {
-							// TODO äÖÈ¾×ÖÄ»
-						}
+						
 						
 						SetSubtitlesNextState(scenceParam.subtitles, 1 / frameFreq);
 						UpdateSubtitlesTexture(scenceParam);
@@ -1075,8 +1062,8 @@ int WINAPI WinMain(
 			}
 			
 
-			pIDXGIOutput1->WaitForVBlank();
-			swapChain3->Present(0, 0);
+			// pIDXGIOutput1->WaitForVBlank();
+			swapchain->Present(1, 0);
 
 			if (decoderParam.playStatus == 0) {
 				displayCount++;
