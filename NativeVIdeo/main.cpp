@@ -13,21 +13,6 @@
 #include <ShlObj.h>
 #include <wrl.h>
 
-extern "C" {
-#include <libavcodec/avcodec.h>
-#pragma comment(lib, "avcodec.lib")
-
-#include <libavformat/avformat.h>
-#pragma comment(lib, "avformat.lib")
-
-#include <libavutil/imgutils.h>
-#pragma comment(lib, "avutil.lib")
-
-#include <libswscale/swscale.h>
-#pragma comment(lib, "swscale.lib")
-
-}
-
 #include <d3d9.h>
 #pragma comment(lib, "d3d9.lib")
 #include <d3d11.h>
@@ -41,6 +26,22 @@ extern "C" {
 
 #include <DirectXMath.h>
 namespace dx = DirectX;
+
+extern "C" {
+#include <libavcodec/avcodec.h>
+#pragma comment(lib, "avcodec.lib")
+
+#include <libavformat/avformat.h>
+#pragma comment(lib, "avformat.lib")
+
+#include <libavutil/imgutils.h>
+#include <libavutil/hwcontext_d3d11va.h>
+#pragma comment(lib, "avutil.lib")
+
+#include <libswscale/swscale.h>
+#pragma comment(lib, "swscale.lib")
+
+}
 
 #include "imgui/backends/imgui_impl_win32.h"
 #include "imgui/backends/imgui_impl_dx11.h"
@@ -180,7 +181,7 @@ struct ScenceParam {
 
 	ComPtr<ID3D11Texture2D> texture;
 	ComPtr<ID3D11Texture2D> subTexture;
-	HANDLE sharedHandle;
+
 	ComPtr<ID3D11ShaderResourceView> srvY;
 	ComPtr<ID3D11ShaderResourceView> srvUV;
 	ComPtr<ID3D11ShaderResourceView> subSrv;
@@ -275,7 +276,7 @@ void SetSubtitlesNextState (list<Subtitle>& subtitles, double second) {
 	}
 }
 
-void InitDecoder(const char* filePath, DecoderParam& param) {
+void InitDecoder(const char* filePath, DecoderParam& param, ID3D11Device* d3d_device, ID3D11DeviceContext* d3d_device_ctx) {
 
 	AVFormatContext* fmtCtx = nullptr;
 	auto ret = avformat_open_input(&fmtCtx, filePath, NULL, NULL);
@@ -334,9 +335,13 @@ void InitDecoder(const char* filePath, DecoderParam& param) {
 	}
 
 	// 启用硬件解码器
-	AVBufferRef* hw_device_ctx = nullptr;
-	av_hwdevice_ctx_create(&hw_device_ctx, AVHWDeviceType::AV_HWDEVICE_TYPE_D3D11VA, NULL, NULL, NULL);
-	vcodecCtx->hw_device_ctx = hw_device_ctx;
+	AVBufferRef* hw_device_ctx = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D11VA);
+	AVHWDeviceContext* device_ctx = reinterpret_cast<AVHWDeviceContext*>(hw_device_ctx->data);
+	AVD3D11VADeviceContext* d3d11va_device_ctx = reinterpret_cast<AVD3D11VADeviceContext*>(device_ctx->hwctx);
+	d3d11va_device_ctx->device = d3d_device;
+	d3d11va_device_ctx->device_context = d3d_device_ctx;
+	vcodecCtx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
+	av_hwdevice_ctx_init(vcodecCtx->hw_device_ctx);
 
 	param.fmtCtx = fmtCtx;
 	param.vcodecCtx = vcodecCtx;
@@ -471,11 +476,6 @@ void InitScence(ID3D11Device* device, ID3D11DeviceContext* ctx, ScenceParam& par
 	tdesc.Width = decoderParam.width;
 	tdesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 	device->CreateTexture2D(&tdesc, nullptr, &param.texture);
-
-	// 创建纹理共享句柄
-	ComPtr<IDXGIResource> dxgiShareTexture;
-	param.texture->QueryInterface(__uuidof(IDXGIResource), (void**)dxgiShareTexture.GetAddressOf());
-	dxgiShareTexture->GetSharedHandle(&param.sharedHandle);
 
 	// 创建着色器资源
 	static const std::map<AVPixelFormat, DXGI_FORMAT> srvYForamt = {
@@ -767,24 +767,11 @@ void Draw(
 	DrawImgui(device, ctx, swapchain, param, decoderParam);
 }
 
-void UpdateVideoTexture(AVFrame* frame, const ScenceParam& scenceParam, const DecoderParam& decoderParam) {
+void UpdateVideoTexture(AVFrame* frame, ID3D11Texture2D* texture, ID3D11DeviceContext* deviceCtx) {
 	ID3D11Texture2D* t_frame = (ID3D11Texture2D*)frame->data[0];
 	int t_index = (int)frame->data[1];
 
-	D3D11_TEXTURE2D_DESC desc;
-	t_frame->GetDesc(&desc);
-
-	ComPtr<ID3D11Device> device;
-	t_frame->GetDevice(device.GetAddressOf());
-
-	ComPtr<ID3D11DeviceContext> deviceCtx;
-	device->GetImmediateContext(&deviceCtx);
-
-	ComPtr<ID3D11Texture2D> videoTexture;
-	device->OpenSharedResource(scenceParam.sharedHandle, __uuidof(ID3D11Texture2D), (void**)&videoTexture);
-
-	deviceCtx->CopySubresourceRegion(videoTexture.Get(), 0, 0, 0, 0, t_frame, t_index, 0);
-	deviceCtx->Flush();
+	deviceCtx->CopySubresourceRegion(texture, 0, 0, 0, 0, t_frame, t_index, 0);
 }
 
 void UpdateSubtitlesTexture(ScenceParam& param) {
@@ -898,8 +885,6 @@ int WINAPI WinMain(
 	DecoderParam decoderParam = {};
 	ScenceParam scenceParam = {};
 
-	InitDecoder(filePath.c_str(), decoderParam);
-
 	auto& width = decoderParam.width;
 	auto& height = decoderParam.height;
 	auto& fmtCtx = decoderParam.fmtCtx;
@@ -975,6 +960,7 @@ int WINAPI WinMain(
 	auto imguiCtx = ImGui::CreateContext();
 	ImGui_ImplWin32_Init(window);
 
+	InitDecoder(filePath.c_str(), decoderParam, d3ddeivce.Get(), d3ddeviceCtx.Get());
 	InitScence(d3ddeivce.Get(), d3ddeviceCtx.Get(), scenceParam, decoderParam);
 
 	// 屏幕刷新率
@@ -1029,10 +1015,9 @@ int WINAPI WinMain(
 					decoderParam.currentSecond = frameCount / frameFreq;
 
 					if (freqRatio >= countRatio) {
-						UpdateVideoTexture(frame, scenceParam, decoderParam);
+						UpdateVideoTexture(frame, scenceParam.texture.Get(), d3ddeviceCtx.Get());
 						
 						int isChange = 0;
-						
 						
 						SetSubtitlesNextState(scenceParam.subtitles, 1 / frameFreq);
 						UpdateSubtitlesTexture(scenceParam);

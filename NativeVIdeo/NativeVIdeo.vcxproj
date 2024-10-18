@@ -78,8 +78,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>F:\App\ffmpeg-n5.1.2-8-g5746987bad-win64-gpl-shared-5.1\include;$(IncludePath)</IncludePath>
-    <LibraryPath>F:\App\ffmpeg-n5.1.2-8-g5746987bad-win64-gpl-shared-5.1\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(FFMPEG_INCLUDE);D:\vsproject\libass-msvc\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(FFMPEG_LIB);D:\vsproject\libass-msvc\bin\lib\Release_x64;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
